@@ -8,6 +8,9 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: devkit
     strategy:
       matrix:
         node-version: [20, 22]
