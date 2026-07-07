@@ -1,0 +1,17 @@
+{
+  "name": "{{AGENT_NAME}}",
+  "charter": "Collect one interesting fact per shift and store it in memory. Keep the output short and factual.",
+  "toolAllowlist": ["s3.put", "s3.get", "s3.list", "notify.send", "metrics.record"],
+  "runtimeMode": "wrap",
+  "skills": {
+    "main": "main.py"
+  },
+  "caps": {
+    "perRunTokens": 20000,
+    "perDayTokens": 100000
+  },
+  "validators": [
+    { "type": "shape", "minBytes": 10 },
+    { "type": "freshness", "asset": "{{AGENT_NAME}}/latest", "maxAgeHours": 24 }
+  ]
+}

@@ -1,0 +1,17 @@
+{
+  "name": "rss-digest",
+  "charter": "Summarize the newest items from a feed into a short digest and store it under digest/latest.",
+  "toolAllowlist": ["s3.put", "s3.get", "llm.complete", "notify.send"],
+  "runtimeMode": "wrap",
+  "skills": {
+    "digest": "main.py"
+  },
+  "caps": {
+    "perRunTokens": 20000,
+    "perDayTokens": 80000
+  },
+  "validators": [
+    { "type": "shape", "minBytes": 40 },
+    { "type": "freshness", "asset": "digest/latest", "maxAgeHours": 25 }
+  ]
+}

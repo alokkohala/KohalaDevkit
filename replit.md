@@ -1,6 +1,6 @@
-# [Project name]
+# Kohala Devkit
 
-_Replace the heading above with the project's name, and this line with one sentence describing what this app does for users._
+Standalone MIT-licensed npm package `@kohala/devkit` (in `devkit/`) — a CLI + local emulator that lets developers build and run Kohala agents entirely on their own machine, then deploy the same agent to kohala.ai.
 
 ## Run & Operate
 
@@ -22,15 +22,30 @@ _Replace the heading above with the project's name, and this line with one sente
 
 ## Where things live
 
-_Populate as you build — short repo map plus pointers to the source-of-truth file for DB schema, API contracts, theme files, etc._
+- `devkit/` — the whole product: standalone npm package `@kohala/devkit` (pure code, no web artifact)
+  - `src/cli/` — `kohala` CLI commands (init, validate, run, trace, memory-serve, login, deploy, doctor)
+  - `src/manifest/` — kohala.json Zod schema + loader with fix hints
+  - `src/emulator/` — local shift runner: tokens/caps, allowlist, validators, wrap-mode + llm-mode
+  - `src/memory/` — file (atomic index + bodies) and Postgres (single-table bytea) backends
+  - `src/mcp/` — MCP memory server (stdio + streamable HTTP)
+  - `src/sdk/` — ToolDispatcher + loopback RPC server the Python SDK talks to
+  - `src/deploy/` — credentials + kohala.ai REST deploy client
+  - `templates/` — `kohala init` scaffold, incl. stdlib-only `skills/_tools.py` Python SDK
+  - `examples/`, `docs/`, `test/` — three example agents, five docs, vitest suite
+- Devkit commands (run from repo root): `pnpm --filter @kohala/devkit run build|test|lint|typecheck`
 
 ## Architecture decisions
 
-_Populate as you build — non-obvious choices a reader couldn't infer from the code (3-5 bullets)._
+- Devkit is standalone-publishable: no `catalog:`/`workspace:` deps (zod ^3.25.76 pinned); `pg` is an optional peer, lazy-imported
+- Platform parity is the contract: tool names (`s3.put`…), cap codes (`PER_RUN_TOKEN_CAP`, `PER_DAY_TOKEN_CAP`, `TOOL_DENIED`), and enforcement order (day admission → allowlist → per-run projection → validators + 2-attempt repair loop) mirror the hosted platform
+- Errors are always loud — no mock LLM responses, no silent fallbacks; llm features need the user's own `ANTHROPIC_API_KEY`
+- Wrap-mode scripts run as a separate Python process over loopback HTTP RPC (`KOHALA_RPC_URL`); script stdout is the run output
+- Anthropic tool names transport dots as `__` (API name charset restriction), mapped back on dispatch
+- State lives under the workspace cwd: `.kohala/{memory,trace,usage}/`
 
 ## Product
 
-_Describe the high-level user-facing capabilities of this app once they exist._
+`npm i -g @kohala/devkit` → `kohala init/validate/run --local/trace` gives the full agent loop with zero account or billing; `kohala memory serve` exposes agent memory over MCP; `kohala login` + `kohala deploy` push the same agent to kohala.ai.
 
 ## User preferences
 

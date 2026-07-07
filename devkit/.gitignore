@@ -1,0 +1,6 @@
+node_modules/
+dist/
+.kohala/
+*.tsbuildinfo
+coverage/
+.DS_Store

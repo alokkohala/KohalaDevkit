@@ -1,0 +1,19 @@
+{
+  "name": "weather-logger",
+  "charter": "Fetch current weather conditions once per shift and store them in memory under weather/latest.",
+  "toolAllowlist": ["s3.put", "s3.get", "s3.list", "http.post_json", "metrics.record"],
+  "runtimeMode": "wrap",
+  "skills": {
+    "collect": "main.py"
+  },
+  "schedule": "0 * * * *",
+  "caps": {
+    "perRunTokens": 10000,
+    "perDayTokens": 50000
+  },
+  "validators": [
+    { "type": "shape", "minBytes": 20 },
+    { "type": "freshness", "asset": "weather/latest", "maxAgeHours": 2 },
+    { "type": "invariant", "pattern": "temperature", "mustMatch": true }
+  ]
+}

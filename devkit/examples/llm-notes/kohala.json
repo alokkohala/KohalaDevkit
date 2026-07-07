@@ -1,0 +1,16 @@
+{
+  "name": "llm-notes",
+  "charter": "You are a note-keeping agent. Each shift, review the notes already in memory (s3.list, s3.get), write one new short observation about what you find under notes/<n>, and finish with a one-line summary.",
+  "toolAllowlist": ["s3.put", "s3.get", "s3.list", "notify.send"],
+  "runtimeMode": "llm",
+  "skills": {
+    "observe": "task.md"
+  },
+  "caps": {
+    "perRunTokens": 30000,
+    "perDayTokens": 120000
+  },
+  "validators": [
+    { "type": "shape", "minBytes": 10 }
+  ]
+}
