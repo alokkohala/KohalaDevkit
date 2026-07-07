@@ -20,11 +20,12 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/kohala-ai/devkit.git"
+    "url": "git+https://github.com/alokkohala/KohalaDevkit.git",
+    "directory": "devkit"
   },
   "homepage": "https://kohala.ai/devkit",
   "bugs": {
-    "url": "https://github.com/kohala-ai/devkit/issues"
+    "url": "https://github.com/alokkohala/KohalaDevkit/issues"
   },
   "keywords": [
     "ai-agents",
