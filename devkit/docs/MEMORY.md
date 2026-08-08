@@ -43,11 +43,19 @@ plain Postgres URL works with no filesystem coupling. Requires the optional
 (Claude Desktop, MCP Inspector, your own tools) can read and write agent
 memory with the platform's exact tool names.
 
+The command must know which agent's memory to scope to. Pass `--agent
+<name>` explicitly, **or** run it from inside an agent directory (one that
+contains `kohala.json`) and it will read the agent name automatically:
+
 ```bash
-# stdio (default) — for clients that spawn a child process
+# Option 1: explicit agent name — run from anywhere
 kohala memory serve --agent my-agent
 
-# streamable HTTP — for MCP Inspector etc.
+# Option 2: run from inside the agent directory
+cd my-agent
+kohala memory serve          # reads agent name from ./kohala.json
+
+# Streamable HTTP — for MCP Inspector etc.
 kohala memory serve --agent my-agent --http --port 8787
 # endpoint: http://127.0.0.1:8787/mcp
 ```

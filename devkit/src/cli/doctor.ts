@@ -36,10 +36,19 @@ export function registerDoctorCommand(program: Command): void {
         warn("python 3 not found", "wrap-mode `kohala run --local` will not work until installed");
       }
 
-      // LLM keys (needed for llm.complete and llm mode).
+      // LLM keys.
+      //   ANTHROPIC_API_KEY  → llm.complete (wrap mode) + llm mode tool-use loop
+      //   GEMINI_API_KEY     → llm.complete (wrap mode) only; llm mode needs Anthropic
       const provider = detectLlmProvider();
-      if (provider) {
-        ok(`LLM key (${provider})`, "llm.complete and llm mode available");
+      const hasAnthropic = Boolean(process.env.ANTHROPIC_API_KEY);
+      if (hasAnthropic) {
+        ok("LLM key (anthropic)", "llm.complete and llm mode both available");
+      } else if (provider === "gemini") {
+        ok("LLM key (gemini)", "llm.complete available in wrap mode");
+        warn(
+          "no ANTHROPIC_API_KEY",
+          "llm mode (runtimeMode: \"llm\") requires Anthropic — GEMINI_API_KEY covers llm.complete only",
+        );
       } else {
         warn(
           "no ANTHROPIC_API_KEY / GEMINI_API_KEY",

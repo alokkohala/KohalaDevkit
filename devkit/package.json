@@ -11,9 +11,14 @@
   "files": [
     "dist",
     "templates",
+    "docs",
+    "examples",
     "README.md",
     "LICENSE",
-    "CHANGELOG.md"
+    "CHANGELOG.md",
+    "CONTRIBUTING.md",
+    "CODE_OF_CONDUCT.md",
+    "SECURITY.md"
   ],
   "engines": {
     "node": ">=20"

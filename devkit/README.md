@@ -55,9 +55,11 @@ skill scripts).
 ```
 
 - `runtimeMode: "wrap"` executes your script directly and validates its
-  output (stdout).
-- `runtimeMode: "llm"` runs a real tool-use loop against **your own**
-  `ANTHROPIC_API_KEY` — the devkit never mocks completions.
+  output (stdout). Use `llm.complete` from the script SDK to call an LLM
+  mid-script (needs `ANTHROPIC_API_KEY` or `GEMINI_API_KEY`).
+- `runtimeMode: "llm"` runs a real Anthropic tool-use loop — requires
+  `ANTHROPIC_API_KEY`. `GEMINI_API_KEY` works for `llm.complete` in wrap
+  mode but not for this loop. The devkit never mocks completions.
 
 ## Docs
 
