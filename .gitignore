@@ -44,6 +44,13 @@ Thumbs.db
 .cursor/rules/nx-rules.mdc
 .github/instructions/nx.instructions.md
 
-# Replit
+# Replit hosting scaffolding — not part of the published devkit
 .cache/
 .local/
+.replit
+.replitignore
+replit.md
+attached_assets/
+artifacts/
+lib/
+scripts/

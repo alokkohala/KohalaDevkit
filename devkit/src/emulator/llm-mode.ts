@@ -1,7 +1,6 @@
 import fs from "node:fs";
 import { estimateTokens } from "./tokens.js";
 import { ToolCallError, ToolDispatcher, type DispatchContext } from "../sdk/dispatch.js";
-import { NoLlmKeyError } from "./llm-client.js";
 
 /**
  * llm runtime mode — a real tool-use loop against the developer's own
@@ -125,9 +124,19 @@ export async function runLlmShift(
 ): Promise<string> {
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) {
-    throw new NoLlmKeyError();
+    // llm mode uses the Anthropic tool-use API specifically.
+    // GEMINI_API_KEY enables llm.complete in wrap mode but not this loop.
+    throw new Error(
+      "NO_LLM_KEY: llm mode requires ANTHROPIC_API_KEY. " +
+        "GEMINI_API_KEY enables llm.complete calls inside wrap-mode skills, " +
+        "but the llm-mode tool-use loop only supports Anthropic. " +
+        "Set ANTHROPIC_API_KEY in your environment to use runtimeMode: \"llm\".",
+    );
   }
-  const model = process.env.KOHALA_LLM_MODEL ?? "claude-3-5-haiku-latest";
+  // Resolution order: KOHALA_LLM_MODEL → ANTHROPIC_MODEL → default.
+  // Default matches the hosted platform model so local behaviour is close to deployed.
+  const model =
+    process.env.KOHALA_LLM_MODEL ?? process.env.ANTHROPIC_MODEL ?? "claude-sonnet-4-6";
   const dispatcher = new ToolDispatcher(context);
   const { manifest, meter, trace, runId } = context;
 

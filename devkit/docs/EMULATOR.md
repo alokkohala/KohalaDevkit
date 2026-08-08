@@ -55,8 +55,35 @@ A real Anthropic tool-use loop with your own `ANTHROPIC_API_KEY`:
 - allowlisted tools → tool definitions (the model can't even see others)
 - every tool invocation goes through the same dispatcher as wrap mode
 
-If no key is configured the run fails with `NO_LLM_KEY`. There is no mock
-fallback by design.
+**`ANTHROPIC_API_KEY` is required for `runtimeMode: "llm"`.** The loop uses
+the Anthropic tool-use API. `GEMINI_API_KEY` enables `llm.complete` calls
+inside wrap-mode skill scripts, but not the llm-mode tool-use loop.
+
+If no Anthropic key is configured the run fails with a clear error message.
+There is no mock fallback by design.
+
+`kohala doctor` reports both cases separately so you can see exactly which
+features your current environment supports.
+
+## Models
+
+The emulator defaults to the same models the hosted platform runs:
+
+| Provider | Default model | Override env var |
+| --- | --- | --- |
+| Anthropic | `claude-sonnet-4-6` | `ANTHROPIC_MODEL` |
+| Gemini | `gemini-flash-latest` | `GEMINI_MODEL` |
+
+Both can be overridden with `KOHALA_LLM_MODEL` (takes precedence over the
+provider-specific vars). Example:
+
+```bash
+ANTHROPIC_MODEL=claude-3-5-haiku-latest kohala run my-agent --local
+```
+
+Because caps are token-based and consumption varies by model, keeping the
+local default in sync with the hosted platform means your cap tuning carries
+over when you deploy.
 
 ## The trace
 

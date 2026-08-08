@@ -28,9 +28,19 @@ export class NoLlmKeyError extends Error {
   }
 }
 
-/** Default models per provider — overridable per call via `model`. */
-const DEFAULT_ANTHROPIC_MODEL = "claude-3-5-haiku-latest";
-const DEFAULT_GEMINI_MODEL = "gemini-2.0-flash";
+/**
+ * Default models per provider.
+ *
+ * Override at runtime with environment variables:
+ *   ANTHROPIC_MODEL   — e.g. "claude-3-5-haiku-latest"
+ *   GEMINI_MODEL      — e.g. "gemini-2.0-flash"
+ *   KOHALA_LLM_MODEL  — provider-agnostic override (takes precedence)
+ *
+ * Defaults match the hosted platform so local behaviour is as close as
+ * possible to what runs after `kohala deploy`.
+ */
+const DEFAULT_ANTHROPIC_MODEL = "claude-sonnet-4-6";
+const DEFAULT_GEMINI_MODEL = "gemini-flash-latest";
 
 /** Which provider will handle completions given the current environment. */
 export function detectLlmProvider(
@@ -56,10 +66,22 @@ export async function completeText(
 ): Promise<CompletionResult> {
   const provider = detectLlmProvider(env);
   if (provider === "anthropic") {
-    return completeAnthropic(prompt, model ?? DEFAULT_ANTHROPIC_MODEL, maxOutputTokens, env);
+    // Resolution order: explicit arg → KOHALA_LLM_MODEL → ANTHROPIC_MODEL → default
+    const resolvedModel =
+      model ??
+      env.KOHALA_LLM_MODEL ??
+      env.ANTHROPIC_MODEL ??
+      DEFAULT_ANTHROPIC_MODEL;
+    return completeAnthropic(prompt, resolvedModel, maxOutputTokens, env);
   }
   if (provider === "gemini") {
-    return completeGemini(prompt, model ?? DEFAULT_GEMINI_MODEL, maxOutputTokens, env);
+    // Resolution order: explicit arg → KOHALA_LLM_MODEL → GEMINI_MODEL → default
+    const resolvedModel =
+      model ??
+      env.KOHALA_LLM_MODEL ??
+      env.GEMINI_MODEL ??
+      DEFAULT_GEMINI_MODEL;
+    return completeGemini(prompt, resolvedModel, maxOutputTokens, env);
   }
   throw new NoLlmKeyError();
 }
