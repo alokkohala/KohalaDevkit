@@ -1,7 +1,6 @@
 import fs from "node:fs";
 import { estimateTokens } from "./tokens.js";
 import { ToolCallError, ToolDispatcher, type DispatchContext } from "../sdk/dispatch.js";
-import { NoLlmKeyError } from "./llm-client.js";
 
 /**
  * llm runtime mode — a real tool-use loop against the developer's own
