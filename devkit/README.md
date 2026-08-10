@@ -93,3 +93,24 @@ See [CONTRIBUTING.md](CONTRIBUTING.md). Bug reports and PRs welcome.
 ## License
 
 [MIT](LICENSE)
+
+### LLM model overrides (local emulator)
+
+`kohala run` in LLM mode picks its model from environment variables:
+
+| Variable | Effect |
+| --- | --- |
+| `KOHALA_LLM_MODEL` | Provider-agnostic override — takes precedence over the two below. |
+| `ANTHROPIC_MODEL` | Anthropic model id (e.g. `claude-3-5-haiku-latest`). |
+| `GEMINI_MODEL` | Gemini model id (e.g. `gemini-2.0-flash`). |
+
+Unset, the emulator uses its built-in defaults.
+
+### Memory server scoping
+
+`kohala memory serve` is always scoped to ONE agent. Either run it from inside
+an agent directory (one containing `kohala.json`) or pass `--agent <name>`:
+
+```bash
+kohala memory serve --agent my-agent --backend file
+```
