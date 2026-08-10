@@ -6,6 +6,7 @@ import { resolveApiKey } from "../deploy/credentials.js";
 import {
   buildDeployPlan,
   DEFAULT_BASE_URL,
+  DeployError,
   KohalaClient,
 } from "../deploy/client.js";
 
@@ -85,8 +86,31 @@ export function registerDeployCommand(program: Command): void {
         );
 
         if (options.run) {
-          const runUrl = await client.triggerManualRun(upserted.id);
-          console.log(pc.green(`  ✔ manual run triggered: ${runUrl}`));
+          try {
+            const runUrl = await client.triggerManualRun(upserted.id);
+            console.log(pc.green(`  ✔ manual run triggered: ${runUrl}`));
+          } catch (error) {
+            // Newly deployed agents start disabled on the platform; a manual
+            // run returns 409 until the owner enables the agent. Explain the
+            // fix instead of surfacing a raw API error — but keep a non-zero
+            // exit so scripts relying on --run notice the run did not happen.
+            if (error instanceof DeployError && error.status === 409) {
+              console.error(
+                pc.yellow(
+                  `  ✖ manual run not started: the agent is not enabled on the platform yet.`,
+                ),
+              );
+              console.error(
+                pc.dim(
+                  `    Deploy itself succeeded. Enable "${manifest.name}" in your kohala.ai dashboard, ` +
+                    `then re-run \`kohala deploy ${agent} --run\` (or trigger a run from the dashboard).`,
+                ),
+              );
+              process.exitCode = 1;
+              return;
+            }
+            throw error;
+          }
         }
 
         console.log("");

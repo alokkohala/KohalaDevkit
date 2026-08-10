@@ -1,0 +1,9 @@
+uploads = []
+generated = []
+
+[[outputs]]
+id = "eB0WTFbcvUSHa-ArbhzRd"
+uri = "file://attached_assets/BUG-032-platform-fix-brief.md"
+type = "text"
+title = "BUG-032 platform fix brief"
+description = "Bug report/task brief for the Replit Agent working on the Kohala platform: skill-attach 500 blocker plus silent quota-cap loss, with live repro evidence and acceptance criteria."
