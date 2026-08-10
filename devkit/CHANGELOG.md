@@ -1,6 +1,18 @@
 # @kohala/devkit
 
-## 0.1.2 (unreleased)
+## 0.1.3 (unreleased)
+
+- **`kohala deploy --run` now explains the "agent not enabled" case instead of
+  a raw 409 API error.** Newly deployed agents start disabled on the platform,
+  so a manual run cannot start until the agent is enabled in the kohala.ai
+  dashboard. The CLI now says exactly that (deploy itself still succeeds; exit
+  code stays non-zero so scripts notice the run did not start).
+
+- **Documented the platform's runtimeMode display mapping.** The platform
+  stores `wrap` under its own enum name `script` (`llm` round-trips as `llm`);
+  verified live — this is display-side naming, not data loss.
+
+## 0.1.2
 
 - **`kohala validate` now rejects tool ids not in the bundled platform
   catalog snapshot** (BUG-033). A typo'd tool id (e.g. `htpp.geet`) used to

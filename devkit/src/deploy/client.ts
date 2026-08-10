@@ -20,6 +20,9 @@ export interface AgentPayload {
   name: string;
   charter: string;
   toolAllowlist: string[];
+  // The platform stores "wrap" under its own enum name "script" (verified
+  // live 2026-08-10: "llm" round-trips as "llm"); this is a display-side
+  // mapping, not data loss — send the manifest value as-is.
   runtimeMode: "wrap" | "llm";
   schedule?: string;
 }
