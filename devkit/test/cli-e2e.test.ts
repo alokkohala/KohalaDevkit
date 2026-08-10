@@ -74,6 +74,29 @@ describe("kohala CLI end to end", () => {
     fs.writeFileSync(manifestPath, original);
   });
 
+  it("validate rejects unknown tool ids and honors --allow-unknown-tools", async () => {
+    const manifestPath = path.join(workDir, "e2e-agent", "kohala.json");
+    const original = fs.readFileSync(manifestPath, "utf8");
+    const typo = JSON.parse(original) as Record<string, unknown>;
+    typo.toolAllowlist = ["htpp.geet"];
+    fs.writeFileSync(manifestPath, JSON.stringify(typo));
+
+    const rejected = await kohala(["validate", "e2e-agent"]);
+    expect(rejected.exitCode).toBe(1);
+    expect(rejected.stderr).toContain("htpp.geet");
+    expect(rejected.stderr).toContain("not in the Kohala tool catalog");
+
+    const allowed = await kohala(["validate", "e2e-agent", "--allow-unknown-tools"]);
+    expect(allowed.exitCode).toBe(0);
+    expect(allowed.stderr).toContain("htpp.geet");
+    expect(allowed.stdout).toContain("is valid");
+
+    fs.writeFileSync(manifestPath, original);
+    const real = await kohala(["validate", "e2e-agent"]);
+    expect(real.exitCode).toBe(0);
+    expect(real.stdout).toContain("is valid");
+  });
+
   it("run --local executes a shift, passes validators, writes memory + trace", async () => {
     const result = await kohala(["run", "e2e-agent", "--local"]);
     expect(result.exitCode).toBe(0);

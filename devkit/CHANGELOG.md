@@ -1,6 +1,25 @@
 # @kohala/devkit
 
-## 0.1.1 (unreleased)
+## 0.1.2 (unreleased)
+
+- **`kohala validate` now rejects tool ids not in the bundled platform
+  catalog snapshot** (BUG-033). A typo'd tool id (e.g. `htpp.geet`) used to
+  pass validation and only fail at deploy/run time; it now fails validation
+  offline with the offending id(s) named. Pass `--allow-unknown-tools` to
+  bypass when the snapshot lags newly added platform tools — the deploy
+  endpoint still verifies against the live catalog authoritatively.
+
+- **Docs: LLM model-override env vars and `memory serve` agent scoping**
+  (BUG-047, BUG-035). The README now documents `KOHALA_LLM_MODEL`,
+  `ANTHROPIC_MODEL`, and `GEMINI_MODEL`, and clarifies that
+  `kohala memory serve` is always scoped to one agent (run it inside an
+  agent directory or pass `--agent <name>`).
+
+- **Repo hygiene: removed Replit workspace scaffolding from the repository**
+  (BUG-016). `.replit`, `replit.md`, `attached_assets/`, and `artifacts/`
+  are no longer tracked in the public repo.
+
+## 0.1.1
 
 Bug fixes.
 

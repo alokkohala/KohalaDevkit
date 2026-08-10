@@ -1,0 +1,1 @@
+- [KohalaDevkit release process](kohala-release-process.md) — PR-gated main, version bump required to publish, scaffolding untracked-but-kept-locally rules.
