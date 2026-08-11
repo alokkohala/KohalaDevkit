@@ -1,1 +1,2 @@
 - [KohalaDevkit release process](kohala-release-process.md) — PR-gated main, version bump required to publish, scaffolding untracked-but-kept-locally rules.
+- [Kohala skills API quirks](kohala-platform-skills-api.md) — canonical `code` field, silent unknown-field drops, DELETE wipes all skills, schema probing via wrong-typed fields.

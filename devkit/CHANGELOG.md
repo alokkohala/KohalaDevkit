@@ -1,6 +1,22 @@
 # @kohala/devkit
 
-## 0.1.3 (unreleased)
+## 0.1.4
+
+- **BUG-067 fixed: skills deployed by `kohala deploy` are now actually
+  runnable.** The CLI used to send the script source in a `scriptContent`
+  field that is not in the platform schema, so the platform stored bare skill
+  metadata with no script asset — the agent deployed with green ticks but
+  every run skipped its skills. The script source is now sent in the
+  platform's canonical `code` field, which makes the platform attach a
+  production-stage script asset (verified live: `GET .../skills` shows
+  `{"type":"script","filename":...,"stage":"production"}`, the same record
+  shape Kai's `agent.attachScript` produces).
+- **Deploy now verifies the script actually attached.** The platform confirms
+  attachment via `script.stage: "production"` in the skill-upload response;
+  if it is missing, deploy fails loudly instead of reporting a green tick for
+  an agent that would no-op.
+
+## 0.1.3
 
 - **`kohala deploy --run` now explains the "agent not enabled" case instead of
   a raw 409 API error.** Newly deployed agents start disabled on the platform,

@@ -32,7 +32,10 @@ export interface SkillPayload {
   name: string;
   scriptFilename: string;
   description: string;
-  scriptContent: string;
+  // The platform's canonical field for script source is `code` (BUG-067:
+  // the old `scriptContent` field is not in the platform schema and was
+  // silently dropped, leaving the skill without a runnable script asset).
+  code: string;
 }
 
 /** Payload for the quota update — the platform's cap field names. */
@@ -63,7 +66,7 @@ export function buildDeployPlan(manifest: AgentManifest, agentDir: string): Depl
       name,
       scriptFilename,
       description: `Skill "${name}" of agent "${manifest.name}"`,
-      scriptContent: fs.readFileSync(scriptPath, "utf8"),
+      code: fs.readFileSync(scriptPath, "utf8"),
     };
   });
 
@@ -162,7 +165,20 @@ export class KohalaClient {
 
   /** Step 2: upload one skill (script content inline). */
   async upsertSkill(agentId: string, payload: SkillPayload): Promise<void> {
-    await this.request("POST", `/api/v1/agents/${agentId}/skills`, payload);
+    const data = (await this.request("POST", `/api/v1/agents/${agentId}/skills`, payload)) as {
+      script?: { stage?: string };
+    } | null;
+    // BUG-067: a skill without a production-stage script asset is skipped by
+    // every run. The platform confirms attachment via `script.stage`; treat
+    // its absence as a hard failure rather than reporting a green tick.
+    if (data?.script?.stage !== "production") {
+      throw new DeployError(
+        500,
+        `Platform accepted skill "${payload.name}" but did not attach a runnable script ` +
+          `(expected script.stage "production" in the response). The deployed agent would ` +
+          `no-op on every run — aborting.`,
+      );
+    }
   }
 
   /** Step 3: set the token caps. */

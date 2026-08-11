@@ -42,7 +42,7 @@ export function registerDeployCommand(program: Command): void {
             console.log(pc.bold(`2. POST /api/v1/agents/:id/skills — "${skill.name}"`));
             console.log(
               JSON.stringify(
-                { ...skill, scriptContent: `<${Buffer.byteLength(skill.scriptContent)} bytes of ${skill.scriptFilename}>` },
+                { ...skill, code: `<${Buffer.byteLength(skill.code)} bytes of ${skill.scriptFilename}>` },
                 null,
                 2,
               ),
