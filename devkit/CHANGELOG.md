@@ -1,5 +1,18 @@
 # @kohala/devkit
 
+## 0.1.5
+
+- **BUG-069 fixed: the manifest `schedule` now actually lands on the
+  platform.** The CLI used to send it as a top-level `schedule` key that is
+  not in the platform schema and was silently dropped (agent deployed green,
+  `agentScheduleCron` stayed null). Deploy now sends the platform's canonical
+  `agentScheduleCron` + `agentScheduleEnabled` fields, and — because the
+  platform honors them only on agent *create*, not on the idempotent
+  upsert-by-name update — additionally PATCHes the schedule after the upsert
+  and verifies it round-tripped, failing loudly if it did not. Deploy stays
+  additive: no schedule in the manifest means the schedule fields are not
+  sent at all, so an existing schedule is never disabled.
+
 ## 0.1.4
 
 - **BUG-067 fixed: skills deployed by `kohala deploy` are now actually

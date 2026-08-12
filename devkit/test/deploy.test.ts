@@ -34,7 +34,8 @@ describe("buildDeployPlan", () => {
       charter: "Do things.",
       toolAllowlist: ["s3.put"],
       runtimeMode: "wrap",
-      schedule: "0 9 * * *",
+      agentScheduleCron: "0 9 * * *",
+      agentScheduleEnabled: true,
     });
     expect(plan.skills).toHaveLength(1);
     expect(plan.skills[0]).toMatchObject({
@@ -59,7 +60,8 @@ describe("buildDeployPlan", () => {
       caps: { perRunTokens: 1, perDayTokens: 2 },
     });
     const plan = buildDeployPlan(manifest, agentDir);
-    expect("schedule" in plan.agent).toBe(false);
+    expect("agentScheduleCron" in plan.agent).toBe(false);
+    expect("agentScheduleEnabled" in plan.agent).toBe(false);
     expect("billingTokens" in plan.quota).toBe(false);
   });
 
@@ -126,6 +128,51 @@ describe("KohalaClient.upsertSkill (BUG-067)", () => {
       const client = new KohalaClient("pk_test", "https://example.test");
       await expect(client.upsertSkill("316", payload)).rejects.toThrow(DeployError);
       await expect(client.upsertSkill("316", payload)).rejects.toThrow(/runnable script/);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+});
+
+describe("KohalaClient.setSchedule (BUG-069)", () => {
+  it("PATCHes canonical schedule fields and accepts a confirmed round-trip", async () => {
+    const fetchMock = vi.fn().mockImplementation(
+      async () =>
+        new Response(
+          JSON.stringify({ id: 336, agentScheduleCron: "0 3 * * *", agentScheduleEnabled: true }),
+          { status: 200 },
+        ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    try {
+      const client = new KohalaClient("pk_test", "https://example.test");
+      await expect(client.setSchedule("336", "0 3 * * *")).resolves.toBeUndefined();
+      const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+      expect(url).toBe("https://example.test/api/v1/agents/336");
+      expect(init.method).toBe("PATCH");
+      expect(JSON.parse(init.body as string)).toEqual({
+        agentScheduleCron: "0 3 * * *",
+        agentScheduleEnabled: true,
+      });
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("fails loudly when the platform does not persist the schedule", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockImplementation(
+        async () =>
+          new Response(
+            JSON.stringify({ id: 336, agentScheduleCron: null, agentScheduleEnabled: false }),
+            { status: 200 },
+          ),
+      ),
+    );
+    try {
+      const client = new KohalaClient("pk_test", "https://example.test");
+      await expect(client.setSchedule("336", "0 3 * * *")).rejects.toThrow(DeployError);
     } finally {
       vi.unstubAllGlobals();
     }

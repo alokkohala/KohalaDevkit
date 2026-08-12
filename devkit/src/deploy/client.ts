@@ -24,7 +24,13 @@ export interface AgentPayload {
   // live 2026-08-10: "llm" round-trips as "llm"); this is a display-side
   // mapping, not data loss — send the manifest value as-is.
   runtimeMode: "wrap" | "llm";
-  schedule?: string;
+  // The platform's canonical schedule fields (BUG-069: the manifest's
+  // `schedule` used to be sent as a top-level `schedule` key, which is not
+  // in the platform schema and was silently dropped). Note the create path
+  // honors these, but the upsert-on-existing-name path ignores them — deploy
+  // therefore also PATCHes the schedule after the upsert (see setSchedule).
+  agentScheduleCron?: string;
+  agentScheduleEnabled?: boolean;
 }
 
 /** Payload for uploading one skill. */
@@ -76,7 +82,9 @@ export function buildDeployPlan(manifest: AgentManifest, agentDir: string): Depl
       charter: manifest.charter,
       toolAllowlist: manifest.toolAllowlist,
       runtimeMode: manifest.runtimeMode,
-      ...(manifest.schedule ? { schedule: manifest.schedule } : {}),
+      ...(manifest.schedule
+        ? { agentScheduleCron: manifest.schedule, agentScheduleEnabled: true }
+        : {}),
     },
     skills,
     quota: {
@@ -177,6 +185,29 @@ export class KohalaClient {
         `Platform accepted skill "${payload.name}" but did not attach a runnable script ` +
           `(expected script.stage "production" in the response). The deployed agent would ` +
           `no-op on every run — aborting.`,
+      );
+    }
+  }
+
+  /**
+   * Step 2b (only when the manifest has a schedule): persist the cron.
+   *
+   * BUG-069: POST /agents honors agentScheduleCron on *create* but silently
+   * ignores it when upserting an existing agent, so deploy PATCHes the
+   * schedule explicitly and verifies it round-tripped. Never called without
+   * a schedule — deploy is additive and must not disable existing schedules.
+   */
+  async setSchedule(agentId: string, cron: string): Promise<void> {
+    const data = (await this.request("PATCH", `/api/v1/agents/${agentId}`, {
+      agentScheduleCron: cron,
+      agentScheduleEnabled: true,
+    })) as { agentScheduleCron?: string | null; agentScheduleEnabled?: boolean } | null;
+    if (data?.agentScheduleCron !== cron || data?.agentScheduleEnabled !== true) {
+      throw new DeployError(
+        500,
+        `Platform did not persist the schedule "${cron}" (got ` +
+          `agentScheduleCron=${JSON.stringify(data?.agentScheduleCron)}, ` +
+          `agentScheduleEnabled=${JSON.stringify(data?.agentScheduleEnabled)}) — aborting.`,
       );
     }
   }
