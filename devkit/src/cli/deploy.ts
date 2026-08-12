@@ -37,6 +37,20 @@ export function registerDeployCommand(program: Command): void {
           console.log("");
           console.log(pc.bold("1. POST /api/v1/agents (idempotent on name)"));
           console.log(JSON.stringify(plan.agent, null, 2));
+          if (plan.agent.agentScheduleCron) {
+            console.log("");
+            console.log(pc.bold("1b. PATCH /api/v1/agents/:id (persist schedule on updates)"));
+            console.log(
+              JSON.stringify(
+                {
+                  agentScheduleCron: plan.agent.agentScheduleCron,
+                  agentScheduleEnabled: true,
+                },
+                null,
+                2,
+              ),
+            );
+          }
           for (const skill of plan.skills) {
             console.log("");
             console.log(pc.bold(`2. POST /api/v1/agents/:id/skills — "${skill.name}"`));
@@ -72,6 +86,11 @@ export function registerDeployCommand(program: Command): void {
         console.log(
           pc.green(`  ✔ agent ${upserted.created ? "created" : "updated"} (id ${upserted.id})`),
         );
+
+        if (plan.agent.agentScheduleCron) {
+          await client.setSchedule(upserted.id, plan.agent.agentScheduleCron);
+          console.log(pc.green(`  ✔ schedule set (${plan.agent.agentScheduleCron})`));
+        }
 
         for (const skill of plan.skills) {
           await client.upsertSkill(upserted.id, skill);
