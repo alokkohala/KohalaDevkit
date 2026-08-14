@@ -197,17 +197,36 @@ export class KohalaClient {
    * schedule explicitly and verifies it round-tripped. Never called without
    * a schedule — deploy is additive and must not disable existing schedules.
    */
-  async setSchedule(agentId: string, cron: string): Promise<void> {
+  async setSchedule(agentId: string, cron: string, scriptFilenames: string[]): Promise<void> {
+    // BUG-077: agentScheduleCron alone does not bind any script to the
+    // schedule — without agentScheduleEntries the platform has "no Production
+    // scripts with INVOCATION_PATHS including cron" and every run 409s with
+    // nothing_to_run. Bind every deployed skill script to the cron.
+    const entries = scriptFilenames.map((scriptFilename) => ({
+      scriptFilename,
+      schedule: cron,
+    }));
     const data = (await this.request("PATCH", `/api/v1/agents/${agentId}`, {
       agentScheduleCron: cron,
       agentScheduleEnabled: true,
-    })) as { agentScheduleCron?: string | null; agentScheduleEnabled?: boolean } | null;
-    if (data?.agentScheduleCron !== cron || data?.agentScheduleEnabled !== true) {
+      agentScheduleEntries: entries,
+    })) as {
+      agentScheduleCron?: string | null;
+      agentScheduleEnabled?: boolean;
+      agentScheduleEntries?: { scriptFilename?: string; schedule?: string }[] | null;
+    } | null;
+    const boundFilenames = new Set(
+      (data?.agentScheduleEntries ?? []).map((entry) => entry.scriptFilename),
+    );
+    const allBound = scriptFilenames.every((filename) => boundFilenames.has(filename));
+    if (data?.agentScheduleCron !== cron || data?.agentScheduleEnabled !== true || !allBound) {
       throw new DeployError(
         500,
         `Platform did not persist the schedule "${cron}" (got ` +
           `agentScheduleCron=${JSON.stringify(data?.agentScheduleCron)}, ` +
-          `agentScheduleEnabled=${JSON.stringify(data?.agentScheduleEnabled)}) — aborting.`,
+          `agentScheduleEnabled=${JSON.stringify(data?.agentScheduleEnabled)}, ` +
+          `agentScheduleEntries=${JSON.stringify(data?.agentScheduleEntries ?? null)}) — ` +
+          `the deployed agent's scripts would not be bound to the schedule. Aborting.`,
       );
     }
   }

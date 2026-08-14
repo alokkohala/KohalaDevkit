@@ -37,26 +37,34 @@ export function registerDeployCommand(program: Command): void {
           console.log("");
           console.log(pc.bold("1. POST /api/v1/agents (idempotent on name)"));
           console.log(JSON.stringify(plan.agent, null, 2));
-          if (plan.agent.agentScheduleCron) {
-            console.log("");
-            console.log(pc.bold("1b. PATCH /api/v1/agents/:id (persist schedule on updates)"));
-            console.log(
-              JSON.stringify(
-                {
-                  agentScheduleCron: plan.agent.agentScheduleCron,
-                  agentScheduleEnabled: true,
-                },
-                null,
-                2,
-              ),
-            );
-          }
           for (const skill of plan.skills) {
             console.log("");
             console.log(pc.bold(`2. POST /api/v1/agents/:id/skills — "${skill.name}"`));
             console.log(
               JSON.stringify(
                 { ...skill, code: `<${Buffer.byteLength(skill.code)} bytes of ${skill.scriptFilename}>` },
+                null,
+                2,
+              ),
+            );
+          }
+          if (plan.agent.agentScheduleCron) {
+            console.log("");
+            console.log(
+              pc.bold(
+                "2b. PATCH /api/v1/agents/:id (persist schedule + bind scripts, after skills upload)",
+              ),
+            );
+            console.log(
+              JSON.stringify(
+                {
+                  agentScheduleCron: plan.agent.agentScheduleCron,
+                  agentScheduleEnabled: true,
+                  agentScheduleEntries: plan.skills.map((skill) => ({
+                    scriptFilename: skill.scriptFilename,
+                    schedule: plan.agent.agentScheduleCron,
+                  })),
+                },
                 null,
                 2,
               ),
@@ -87,14 +95,22 @@ export function registerDeployCommand(program: Command): void {
           pc.green(`  ✔ agent ${upserted.created ? "created" : "updated"} (id ${upserted.id})`),
         );
 
-        if (plan.agent.agentScheduleCron) {
-          await client.setSchedule(upserted.id, plan.agent.agentScheduleCron);
-          console.log(pc.green(`  ✔ schedule set (${plan.agent.agentScheduleCron})`));
-        }
-
         for (const skill of plan.skills) {
           await client.upsertSkill(upserted.id, skill);
           console.log(pc.green(`  ✔ skill "${skill.name}" uploaded (${skill.scriptFilename})`));
+        }
+
+        // Schedule is set AFTER skills so agentScheduleEntries can bind the
+        // just-uploaded scripts to the cron (BUG-077: cron alone binds
+        // nothing and every run 409s with nothing_to_run).
+        if (plan.agent.agentScheduleCron) {
+          const filenames = plan.skills.map((skill) => skill.scriptFilename);
+          await client.setSchedule(upserted.id, plan.agent.agentScheduleCron, filenames);
+          console.log(
+            pc.green(
+              `  ✔ schedule set (${plan.agent.agentScheduleCron}, bound: ${filenames.join(", ")})`,
+            ),
+          );
         }
 
         await client.setQuota(upserted.id, plan.quota);
