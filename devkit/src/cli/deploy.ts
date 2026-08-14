@@ -5,6 +5,7 @@ import { loadManifest } from "../manifest/load.js";
 import { resolveApiKey } from "../deploy/credentials.js";
 import {
   buildDeployPlan,
+  classifyManualRun409,
   DEFAULT_BASE_URL,
   DeployError,
   KohalaClient,
@@ -125,22 +126,43 @@ export function registerDeployCommand(program: Command): void {
             const runUrl = await client.triggerManualRun(upserted.id);
             console.log(pc.green(`  ✔ manual run triggered: ${runUrl}`));
           } catch (error) {
-            // Newly deployed agents start disabled on the platform; a manual
-            // run returns 409 until the owner enables the agent. Explain the
-            // fix instead of surfacing a raw API error — but keep a non-zero
-            // exit so scripts relying on --run notice the run did not happen.
+            // A manual run can 409 for two distinct reasons (BUG-006: they
+            // used to be conflated into one "not enabled" message). Explain
+            // the actual failure — but keep a non-zero exit so scripts
+            // relying on --run notice the run did not happen.
             if (error instanceof DeployError && error.status === 409) {
-              console.error(
-                pc.yellow(
-                  `  ✖ manual run not started: the agent is not enabled on the platform yet.`,
-                ),
-              );
-              console.error(
-                pc.dim(
-                  `    Deploy itself succeeded. Enable "${manifest.name}" in your kohala.ai dashboard, ` +
-                    `then re-run \`kohala deploy ${agent} --run\` (or trigger a run from the dashboard).`,
-                ),
-              );
+              const reason = classifyManualRun409(error);
+              if (reason === "nothing_to_run") {
+                console.error(
+                  pc.yellow(
+                    `  ✖ manual run not started: no script is bound to an active schedule, ` +
+                      `so a run would execute nothing.`,
+                  ),
+                );
+                console.error(
+                  pc.dim(
+                    `    Deploy itself succeeded. The platform only runs scripts bound to a cron ` +
+                      `schedule: add e.g. "schedule": "0 9 * * *" to kohala.json, then re-run ` +
+                      `\`kohala deploy ${agent} --run\` — deploy binds every skill script to it.`,
+                  ),
+                );
+              } else if (reason === "disabled") {
+                console.error(
+                  pc.yellow(
+                    `  ✖ manual run not started: the agent is not enabled on the platform yet.`,
+                  ),
+                );
+                console.error(
+                  pc.dim(
+                    `    Deploy itself succeeded. Enable "${manifest.name}" in your kohala.ai ` +
+                      `dashboard, then re-run \`kohala deploy ${agent} --run\` (or trigger a run ` +
+                      `from the dashboard). Enabling survives redeploys.`,
+                  ),
+                );
+              } else {
+                console.error(pc.yellow(`  ✖ manual run not started (409).`));
+                console.error(pc.dim(`    ${error.message}`));
+              }
               process.exitCode = 1;
               return;
             }
