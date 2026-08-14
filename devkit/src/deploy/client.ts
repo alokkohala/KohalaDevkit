@@ -100,6 +100,28 @@ export function buildDeployPlan(manifest: AgentManifest, agentDir: string): Depl
   };
 }
 
+/** One script binding on the agent-level schedule (BUG-077). */
+export interface ScheduleEntry {
+  scriptFilename: string;
+  schedule: string;
+}
+
+/**
+ * The schedule-entry payload deploy would send for the manifest's scripts —
+ * shared by `--dry-run` and the real PATCH so the dry-run output is exactly
+ * what goes on the wire. Returns undefined when there is nothing to bind
+ * (the field is then omitted entirely — deploy is additive and must never
+ * send a clearing empty array).
+ */
+export function buildScheduleEntries(
+  cron: string,
+  scriptFilenames: string[],
+): ScheduleEntry[] | undefined {
+  const filenames = [...new Set(scriptFilenames)];
+  if (filenames.length === 0) return undefined;
+  return filenames.map((scriptFilename) => ({ scriptFilename, schedule: cron }));
+}
+
 /** Error with a user-actionable message for known HTTP statuses. */
 export class DeployError extends Error {
   constructor(
@@ -208,24 +230,43 @@ export class KohalaClient {
    * uploads so the entries always reference scripts that exist remotely.
    */
   async setSchedule(agentId: string, cron: string, scriptFilenames: string[]): Promise<void> {
-    const filenames = [...new Set(scriptFilenames)];
+    const desired = buildScheduleEntries(cron, scriptFilenames);
+    // The platform treats agentScheduleEntries as a REPLACEMENT array, so an
+    // additive deploy must merge with what is already there: read the
+    // current entries and preserve every binding for a script this manifest
+    // does not manage. Our own scripts are re-bound to the manifest cron.
+    let merged: ScheduleEntry[] | undefined = desired;
+    if (desired) {
+      const ours = new Set(desired.map((e) => e.scriptFilename));
+      const current = (await this.request("GET", `/api/v1/agents/${agentId}`)) as {
+        agentScheduleEntries?: Array<{
+          scriptFilename?: string | null;
+          schedule?: string | null;
+        }> | null;
+      } | null;
+      const preserved = (
+        Array.isArray(current?.agentScheduleEntries) ? current.agentScheduleEntries : []
+      ).filter(
+        (e): e is { scriptFilename: string; schedule: string } =>
+          typeof e?.scriptFilename === "string" &&
+          typeof e?.schedule === "string" &&
+          !ours.has(e.scriptFilename),
+      );
+      merged = [...preserved, ...desired];
+    }
     const data = (await this.request("PATCH", `/api/v1/agents/${agentId}`, {
       agentScheduleCron: cron,
       agentScheduleEnabled: true,
-      // Deploy is additive: only send entries when there are scripts to
-      // bind — an empty array could clear bindings made outside the CLI.
-      ...(filenames.length > 0
-        ? {
-            agentScheduleEntries: filenames.map((scriptFilename) => ({
-              scriptFilename,
-              schedule: cron,
-            })),
-          }
-        : {}),
+      // Omitted entirely when there is nothing to bind — an empty array
+      // would clear bindings made outside the CLI.
+      ...(merged ? { agentScheduleEntries: merged } : {}),
     })) as {
       agentScheduleCron?: string | null;
       agentScheduleEnabled?: boolean;
-      agentScheduleEntries?: Array<{ scriptFilename?: string | null }> | null;
+      agentScheduleEntries?: Array<{
+        scriptFilename?: string | null;
+        schedule?: string | null;
+      }> | null;
     } | null;
     if (data?.agentScheduleCron !== cron || data?.agentScheduleEnabled !== true) {
       throw new DeployError(
@@ -235,17 +276,22 @@ export class KohalaClient {
           `agentScheduleEnabled=${JSON.stringify(data?.agentScheduleEnabled)}) — aborting.`,
       );
     }
-    const boundFilenames = new Set(
+    const boundSchedules = new Map(
       (Array.isArray(data?.agentScheduleEntries) ? data.agentScheduleEntries : [])
-        .map((entry) => entry?.scriptFilename)
-        .filter((f): f is string => typeof f === "string"),
+        .filter((entry) => typeof entry?.scriptFilename === "string")
+        .map((entry) => [entry.scriptFilename as string, entry?.schedule]),
     );
-    const unbound = filenames.filter((f) => !boundFilenames.has(f));
+    // Every requested binding must round-trip with the requested cron — a
+    // present-but-stale entry is the same silent no-run failure as a
+    // missing one.
+    const unbound = (desired ?? []).filter(
+      (e) => boundSchedules.get(e.scriptFilename) !== cron,
+    );
     if (unbound.length > 0) {
       throw new DeployError(
         500,
         `Platform persisted the cron but did not bind it to script(s) ` +
-          `${unbound.map((f) => `"${f}"`).join(", ")} (agentScheduleEntries=` +
+          `${unbound.map((e) => `"${e.scriptFilename}"`).join(", ")} (agentScheduleEntries=` +
           `${JSON.stringify(data?.agentScheduleEntries ?? null)}). The agent would ` +
           `refuse to run with 409 nothing_to_run — aborting.`,
       );

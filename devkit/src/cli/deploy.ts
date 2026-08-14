@@ -5,6 +5,7 @@ import { loadManifest } from "../manifest/load.js";
 import { resolveApiKey } from "../deploy/credentials.js";
 import {
   buildDeployPlan,
+  buildScheduleEntries,
   DEFAULT_BASE_URL,
   DeployError,
   KohalaClient,
@@ -55,22 +56,30 @@ export function registerDeployCommand(program: Command): void {
                 "2b. PATCH /api/v1/agents/:id (persist schedule on updates + bind the scripts)",
               ),
             );
+            const entries = buildScheduleEntries(
+              plan.agent.agentScheduleCron,
+              plan.skills.map((s) => s.scriptFilename),
+            );
             console.log(
               JSON.stringify(
                 {
                   agentScheduleCron: plan.agent.agentScheduleCron,
                   agentScheduleEnabled: true,
-                  agentScheduleEntries: [
-                    ...new Set(plan.skills.map((s) => s.scriptFilename)),
-                  ].map((scriptFilename) => ({
-                    scriptFilename,
-                    schedule: plan.agent.agentScheduleCron,
-                  })),
+                  // Same conditional builder as the real request: omitted
+                  // entirely when there is nothing to bind.
+                  ...(entries ? { agentScheduleEntries: entries } : {}),
                 },
                 null,
                 2,
               ),
             );
+            if (entries) {
+              console.log(
+                pc.dim(
+                  "   (bindings for scripts not in this manifest are read from the platform and preserved)",
+                ),
+              );
+            }
           }
           console.log("");
           console.log(pc.bold("3. PUT /api/v1/agents/:id/quota"));

@@ -135,26 +135,51 @@ describe("KohalaClient.upsertSkill (BUG-067)", () => {
 });
 
 describe("KohalaClient.setSchedule (BUG-069 / BUG-077)", () => {
-  it("PATCHes canonical schedule fields, binds the scripts, and accepts a confirmed round-trip", async () => {
-    const fetchMock = vi.fn().mockImplementation(
-      async () =>
-        new Response(
-          JSON.stringify({
-            id: 336,
-            agentScheduleCron: "0 3 * * *",
-            agentScheduleEnabled: true,
-            agentScheduleEntries: [{ scriptFilename: "main.py", schedule: "0 3 * * *" }],
-          }),
+  /**
+   * setSchedule with scripts to bind makes TWO requests: a GET to read the
+   * agent's current entries (so out-of-band bindings survive the
+   * replacement-array PATCH) followed by the PATCH itself. This helper
+   * stubs fetch to answer both.
+   */
+  function stubScheduleFetch(opts: {
+    currentEntries?: unknown;
+    patchResponse: Record<string, unknown>;
+  }) {
+    const fetchMock = vi.fn().mockImplementation(async (_url: string, init?: RequestInit) => {
+      if (!init || init.method === "GET" || init.method === undefined) {
+        return new Response(
+          JSON.stringify({ id: 336, agentScheduleEntries: opts.currentEntries ?? null }),
           { status: 200 },
-        ),
-    );
+        );
+      }
+      return new Response(JSON.stringify(opts.patchResponse), { status: 200 });
+    });
     vi.stubGlobal("fetch", fetchMock);
+    return fetchMock;
+  }
+
+  function patchCall(fetchMock: ReturnType<typeof vi.fn>): [string, RequestInit] {
+    const call = fetchMock.mock.calls.find(
+      ([, init]) => (init as RequestInit | undefined)?.method === "PATCH",
+    );
+    if (!call) throw new Error("no PATCH request was made");
+    return call as [string, RequestInit];
+  }
+
+  it("PATCHes canonical schedule fields, binds the scripts, and accepts a confirmed round-trip", async () => {
+    const fetchMock = stubScheduleFetch({
+      patchResponse: {
+        id: 336,
+        agentScheduleCron: "0 3 * * *",
+        agentScheduleEnabled: true,
+        agentScheduleEntries: [{ scriptFilename: "main.py", schedule: "0 3 * * *" }],
+      },
+    });
     try {
       const client = new KohalaClient("pk_test", "https://example.test");
       await expect(client.setSchedule("336", "0 3 * * *", ["main.py"])).resolves.toBeUndefined();
-      const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+      const [url, init] = patchCall(fetchMock);
       expect(url).toBe("https://example.test/api/v1/agents/336");
-      expect(init.method).toBe("PATCH");
       expect(JSON.parse(init.body as string)).toEqual({
         agentScheduleCron: "0 3 * * *",
         agentScheduleEnabled: true,
@@ -165,27 +190,51 @@ describe("KohalaClient.setSchedule (BUG-069 / BUG-077)", () => {
     }
   });
 
+  it("preserves bindings made outside the CLI (additive deploy)", async () => {
+    const fetchMock = stubScheduleFetch({
+      currentEntries: [
+        { scriptFilename: "ops.py", schedule: "0 6 * * *" },
+        { scriptFilename: "main.py", schedule: "0 1 * * *" }, // ours — re-bound
+      ],
+      patchResponse: {
+        id: 336,
+        agentScheduleCron: "0 3 * * *",
+        agentScheduleEnabled: true,
+        agentScheduleEntries: [
+          { scriptFilename: "ops.py", schedule: "0 6 * * *" },
+          { scriptFilename: "main.py", schedule: "0 3 * * *" },
+        ],
+      },
+    });
+    try {
+      const client = new KohalaClient("pk_test", "https://example.test");
+      await client.setSchedule("336", "0 3 * * *", ["main.py"]);
+      const [, init] = patchCall(fetchMock);
+      expect(JSON.parse(init.body as string).agentScheduleEntries).toEqual([
+        { scriptFilename: "ops.py", schedule: "0 6 * * *" }, // untouched
+        { scriptFilename: "main.py", schedule: "0 3 * * *" }, // manifest cron wins
+      ]);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
   it("dedupes script filenames and binds each one once", async () => {
-    const fetchMock = vi.fn().mockImplementation(
-      async () =>
-        new Response(
-          JSON.stringify({
-            id: 336,
-            agentScheduleCron: "0 3 * * *",
-            agentScheduleEnabled: true,
-            agentScheduleEntries: [
-              { scriptFilename: "main.py", schedule: "0 3 * * *" },
-              { scriptFilename: "other.py", schedule: "0 3 * * *" },
-            ],
-          }),
-          { status: 200 },
-        ),
-    );
-    vi.stubGlobal("fetch", fetchMock);
+    const fetchMock = stubScheduleFetch({
+      patchResponse: {
+        id: 336,
+        agentScheduleCron: "0 3 * * *",
+        agentScheduleEnabled: true,
+        agentScheduleEntries: [
+          { scriptFilename: "main.py", schedule: "0 3 * * *" },
+          { scriptFilename: "other.py", schedule: "0 3 * * *" },
+        ],
+      },
+    });
     try {
       const client = new KohalaClient("pk_test", "https://example.test");
       await client.setSchedule("336", "0 3 * * *", ["main.py", "other.py", "main.py"]);
-      const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+      const [, init] = patchCall(fetchMock);
       expect(JSON.parse(init.body as string).agentScheduleEntries).toEqual([
         { scriptFilename: "main.py", schedule: "0 3 * * *" },
         { scriptFilename: "other.py", schedule: "0 3 * * *" },
@@ -195,7 +244,7 @@ describe("KohalaClient.setSchedule (BUG-069 / BUG-077)", () => {
     }
   });
 
-  it("omits agentScheduleEntries entirely when there are no scripts to bind", async () => {
+  it("omits agentScheduleEntries entirely when there are no scripts to bind (single request)", async () => {
     const fetchMock = vi.fn().mockImplementation(
       async () =>
         new Response(
@@ -207,7 +256,10 @@ describe("KohalaClient.setSchedule (BUG-069 / BUG-077)", () => {
     try {
       const client = new KohalaClient("pk_test", "https://example.test");
       await expect(client.setSchedule("336", "0 3 * * *", [])).resolves.toBeUndefined();
+      // No scripts → no merge needed → no GET, just the PATCH.
+      expect(fetchMock).toHaveBeenCalledTimes(1);
       const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+      expect(init.method).toBe("PATCH");
       expect(JSON.parse(init.body as string)).not.toHaveProperty("agentScheduleEntries");
     } finally {
       vi.unstubAllGlobals();
@@ -215,16 +267,9 @@ describe("KohalaClient.setSchedule (BUG-069 / BUG-077)", () => {
   });
 
   it("fails loudly when the platform does not persist the schedule", async () => {
-    vi.stubGlobal(
-      "fetch",
-      vi.fn().mockImplementation(
-        async () =>
-          new Response(
-            JSON.stringify({ id: 336, agentScheduleCron: null, agentScheduleEnabled: false }),
-            { status: 200 },
-          ),
-      ),
-    );
+    stubScheduleFetch({
+      patchResponse: { id: 336, agentScheduleCron: null, agentScheduleEnabled: false },
+    });
     try {
       const client = new KohalaClient("pk_test", "https://example.test");
       await expect(client.setSchedule("336", "0 3 * * *", ["main.py"])).rejects.toThrow(
@@ -239,24 +284,37 @@ describe("KohalaClient.setSchedule (BUG-069 / BUG-077)", () => {
     // The exact field state observed on agent 348: cron + enabled stored,
     // agentScheduleEntries null — the agent looks complete but 409s
     // nothing_to_run on every trigger.
-    vi.stubGlobal(
-      "fetch",
-      vi.fn().mockImplementation(
-        async () =>
-          new Response(
-            JSON.stringify({
-              id: 348,
-              agentScheduleCron: "0 3 29 2 *",
-              agentScheduleEnabled: true,
-              agentScheduleEntries: null,
-            }),
-            { status: 200 },
-          ),
-      ),
-    );
+    stubScheduleFetch({
+      patchResponse: {
+        id: 348,
+        agentScheduleCron: "0 3 29 2 *",
+        agentScheduleEnabled: true,
+        agentScheduleEntries: null,
+      },
+    });
     try {
       const client = new KohalaClient("pk_test", "https://example.test");
       await expect(client.setSchedule("348", "0 3 29 2 *", ["main.py"])).rejects.toThrow(
+        /did not bind/,
+      );
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("fails loudly when the binding round-trips with a stale schedule", async () => {
+    stubScheduleFetch({
+      patchResponse: {
+        id: 336,
+        agentScheduleCron: "0 3 * * *",
+        agentScheduleEnabled: true,
+        // Entry exists but kept an old cron — same silent no-run failure.
+        agentScheduleEntries: [{ scriptFilename: "main.py", schedule: "0 9 * * *" }],
+      },
+    });
+    try {
+      const client = new KohalaClient("pk_test", "https://example.test");
+      await expect(client.setSchedule("336", "0 3 * * *", ["main.py"])).rejects.toThrow(
         /did not bind/,
       );
     } finally {
