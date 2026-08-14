@@ -76,6 +76,14 @@ export function buildDeployPlan(manifest: AgentManifest, agentDir: string): Depl
     };
   });
 
+  if (manifest.schedule && skills.length === 0) {
+    throw new Error(
+      `Manifest has a schedule ("${manifest.schedule}") but no skills — the platform ` +
+        `would have nothing to run on that schedule (every run fails with nothing_to_run). ` +
+        `Add at least one skill or remove the schedule.`,
+    );
+  }
+
   return {
     agent: {
       name: manifest.name,
@@ -216,9 +224,13 @@ export class KohalaClient {
       agentScheduleEntries?: { scriptFilename?: string; schedule?: string }[] | null;
     } | null;
     const boundFilenames = new Set(
-      (data?.agentScheduleEntries ?? []).map((entry) => entry.scriptFilename),
+      (data?.agentScheduleEntries ?? [])
+        .filter((entry) => entry.schedule === cron)
+        .map((entry) => entry.scriptFilename),
     );
-    const allBound = scriptFilenames.every((filename) => boundFilenames.has(filename));
+    const allBound =
+      scriptFilenames.length > 0 &&
+      scriptFilenames.every((filename) => boundFilenames.has(filename));
     if (data?.agentScheduleCron !== cron || data?.agentScheduleEnabled !== true || !allBound) {
       throw new DeployError(
         500,

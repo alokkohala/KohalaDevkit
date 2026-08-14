@@ -212,3 +212,51 @@ describe("KohalaClient.setSchedule (BUG-069 / BUG-077)", () => {
     }
   });
 });
+
+describe("setSchedule binding verification hardening (BUG-077 review)", () => {
+  it("rejects bindings whose schedule does not match the requested cron", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockImplementation(
+        async () =>
+          new Response(
+            JSON.stringify({
+              id: 336,
+              agentScheduleCron: "0 3 * * *",
+              agentScheduleEnabled: true,
+              agentScheduleEntries: [{ scriptFilename: "main.py", schedule: "1 1 * * *" }],
+            }),
+            { status: 200 },
+          ),
+      ),
+    );
+    try {
+      const client = new KohalaClient("pk_test", "https://example.test");
+      await expect(client.setSchedule("336", "0 3 * * *", ["main.py"])).rejects.toThrow(
+        /not be bound/,
+      );
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+});
+
+describe("buildDeployPlan schedule/skills consistency (BUG-077 review)", () => {
+  it("rejects a schedule with zero skills", () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "kohala-sched-"));
+    try {
+      const manifest = manifestSchema.parse({
+        name: "sched-only",
+        charter: "c",
+        toolAllowlist: [],
+        runtimeMode: "wrap",
+        skills: {},
+        caps: { perRunTokens: 1, perDayTokens: 2 },
+        schedule: "0 3 * * *",
+      });
+      expect(() => buildDeployPlan(manifest, dir)).toThrow(/nothing_to_run|no skills/);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
