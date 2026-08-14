@@ -5,6 +5,7 @@ import { loadManifest } from "../manifest/load.js";
 import { resolveApiKey } from "../deploy/credentials.js";
 import {
   buildDeployPlan,
+  buildScheduleEntries,
   DEFAULT_BASE_URL,
   DeployError,
   KohalaClient,
@@ -37,20 +38,6 @@ export function registerDeployCommand(program: Command): void {
           console.log("");
           console.log(pc.bold("1. POST /api/v1/agents (idempotent on name)"));
           console.log(JSON.stringify(plan.agent, null, 2));
-          if (plan.agent.agentScheduleCron) {
-            console.log("");
-            console.log(pc.bold("1b. PATCH /api/v1/agents/:id (persist schedule on updates)"));
-            console.log(
-              JSON.stringify(
-                {
-                  agentScheduleCron: plan.agent.agentScheduleCron,
-                  agentScheduleEnabled: true,
-                },
-                null,
-                2,
-              ),
-            );
-          }
           for (const skill of plan.skills) {
             console.log("");
             console.log(pc.bold(`2. POST /api/v1/agents/:id/skills — "${skill.name}"`));
@@ -61,6 +48,38 @@ export function registerDeployCommand(program: Command): void {
                 2,
               ),
             );
+          }
+          if (plan.agent.agentScheduleCron) {
+            console.log("");
+            console.log(
+              pc.bold(
+                "2b. PATCH /api/v1/agents/:id (persist schedule on updates + bind the scripts)",
+              ),
+            );
+            const entries = buildScheduleEntries(
+              plan.agent.agentScheduleCron,
+              plan.skills.map((s) => s.scriptFilename),
+            );
+            console.log(
+              JSON.stringify(
+                {
+                  agentScheduleCron: plan.agent.agentScheduleCron,
+                  agentScheduleEnabled: true,
+                  // Same conditional builder as the real request: omitted
+                  // entirely when there is nothing to bind.
+                  ...(entries ? { agentScheduleEntries: entries } : {}),
+                },
+                null,
+                2,
+              ),
+            );
+            if (entries) {
+              console.log(
+                pc.dim(
+                  "   (bindings for scripts not in this manifest are read from the platform and preserved)",
+                ),
+              );
+            }
           }
           console.log("");
           console.log(pc.bold("3. PUT /api/v1/agents/:id/quota"));
@@ -87,14 +106,24 @@ export function registerDeployCommand(program: Command): void {
           pc.green(`  ✔ agent ${upserted.created ? "created" : "updated"} (id ${upserted.id})`),
         );
 
-        if (plan.agent.agentScheduleCron) {
-          await client.setSchedule(upserted.id, plan.agent.agentScheduleCron);
-          console.log(pc.green(`  ✔ schedule set (${plan.agent.agentScheduleCron})`));
-        }
-
         for (const skill of plan.skills) {
           await client.upsertSkill(upserted.id, skill);
           console.log(pc.green(`  ✔ skill "${skill.name}" uploaded (${skill.scriptFilename})`));
+        }
+
+        // BUG-077: the schedule step runs AFTER the skill uploads and binds
+        // the cron to every deployed script via agentScheduleEntries — the
+        // agent-level cron alone leaves nothing bound and the agent refuses
+        // to run (409 nothing_to_run) despite an all-green deploy.
+        if (plan.agent.agentScheduleCron) {
+          const filenames = plan.skills.map((s) => s.scriptFilename);
+          await client.setSchedule(upserted.id, plan.agent.agentScheduleCron, filenames);
+          console.log(
+            pc.green(
+              `  ✔ schedule set (${plan.agent.agentScheduleCron}) and bound to ` +
+                `${[...new Set(filenames)].join(", ") || "(no scripts)"}`,
+            ),
+          );
         }
 
         await client.setQuota(upserted.id, plan.quota);

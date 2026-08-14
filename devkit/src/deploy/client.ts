@@ -100,6 +100,28 @@ export function buildDeployPlan(manifest: AgentManifest, agentDir: string): Depl
   };
 }
 
+/** One script binding on the agent-level schedule (BUG-077). */
+export interface ScheduleEntry {
+  scriptFilename: string;
+  schedule: string;
+}
+
+/**
+ * The schedule-entry payload deploy would send for the manifest's scripts —
+ * shared by `--dry-run` and the real PATCH so the dry-run output is exactly
+ * what goes on the wire. Returns undefined when there is nothing to bind
+ * (the field is then omitted entirely — deploy is additive and must never
+ * send a clearing empty array).
+ */
+export function buildScheduleEntries(
+  cron: string,
+  scriptFilenames: string[],
+): ScheduleEntry[] | undefined {
+  const filenames = [...new Set(scriptFilenames)];
+  if (filenames.length === 0) return undefined;
+  return filenames.map((scriptFilename) => ({ scriptFilename, schedule: cron }));
+}
+
 /** Error with a user-actionable message for known HTTP statuses. */
 export class DeployError extends Error {
   constructor(
@@ -190,24 +212,88 @@ export class KohalaClient {
   }
 
   /**
-   * Step 2b (only when the manifest has a schedule): persist the cron.
+   * Step 2b (only when the manifest has a schedule): persist the cron AND
+   * bind it to the agent's scripts.
    *
    * BUG-069: POST /agents honors agentScheduleCron on *create* but silently
    * ignores it when upserting an existing agent, so deploy PATCHes the
    * schedule explicitly and verifies it round-tripped. Never called without
    * a schedule — deploy is additive and must not disable existing schedules.
+   *
+   * BUG-077: `agentScheduleCron` + `agentScheduleEnabled` alone are NOT
+   * enough for the agent to run — nothing binds the script until
+   * `agentScheduleEntries` names it. Without the binding a scheduled tick
+   * (and a manual run) finds no cron-invoked Production script and refuses
+   * with 409 nothing_to_run, despite every deploy step reporting green.
+   * Deploy therefore sends one entry per deployed script filename and
+   * verifies every filename round-tripped. This runs AFTER the skill
+   * uploads so the entries always reference scripts that exist remotely.
    */
-  async setSchedule(agentId: string, cron: string): Promise<void> {
+  async setSchedule(agentId: string, cron: string, scriptFilenames: string[]): Promise<void> {
+    const desired = buildScheduleEntries(cron, scriptFilenames);
+    // The platform treats agentScheduleEntries as a REPLACEMENT array, so an
+    // additive deploy must merge with what is already there: read the
+    // current entries and preserve every binding for a script this manifest
+    // does not manage. Our own scripts are re-bound to the manifest cron.
+    let merged: ScheduleEntry[] | undefined = desired;
+    if (desired) {
+      const ours = new Set(desired.map((e) => e.scriptFilename));
+      const current = (await this.request("GET", `/api/v1/agents/${agentId}`)) as {
+        agentScheduleEntries?: Array<{
+          scriptFilename?: string | null;
+          schedule?: string | null;
+        }> | null;
+      } | null;
+      const preserved = (
+        Array.isArray(current?.agentScheduleEntries) ? current.agentScheduleEntries : []
+      ).filter(
+        (e): e is { scriptFilename: string; schedule: string } =>
+          typeof e?.scriptFilename === "string" &&
+          typeof e?.schedule === "string" &&
+          !ours.has(e.scriptFilename),
+      );
+      merged = [...preserved, ...desired];
+    }
     const data = (await this.request("PATCH", `/api/v1/agents/${agentId}`, {
       agentScheduleCron: cron,
       agentScheduleEnabled: true,
-    })) as { agentScheduleCron?: string | null; agentScheduleEnabled?: boolean } | null;
+      // Omitted entirely when there is nothing to bind — an empty array
+      // would clear bindings made outside the CLI.
+      ...(merged ? { agentScheduleEntries: merged } : {}),
+    })) as {
+      agentScheduleCron?: string | null;
+      agentScheduleEnabled?: boolean;
+      agentScheduleEntries?: Array<{
+        scriptFilename?: string | null;
+        schedule?: string | null;
+      }> | null;
+    } | null;
     if (data?.agentScheduleCron !== cron || data?.agentScheduleEnabled !== true) {
       throw new DeployError(
         500,
         `Platform did not persist the schedule "${cron}" (got ` +
           `agentScheduleCron=${JSON.stringify(data?.agentScheduleCron)}, ` +
           `agentScheduleEnabled=${JSON.stringify(data?.agentScheduleEnabled)}) — aborting.`,
+      );
+    }
+    const boundSchedules = new Map(
+      (Array.isArray(data?.agentScheduleEntries) ? data.agentScheduleEntries : [])
+        .filter((entry) => typeof entry?.scriptFilename === "string")
+        .map((entry) => [entry.scriptFilename as string, entry?.schedule]),
+    );
+    // Every requested binding must round-trip with the requested cron — a
+    // present-but-stale entry is the same silent no-run failure as a
+    // missing one.
+    const unbound = (desired ?? []).filter(
+      (e) => boundSchedules.get(e.scriptFilename) !== cron,
+    );
+    if (unbound.length > 0) {
+      throw new DeployError(
+        500,
+        `Platform persisted the cron but did not bind it to script(s) ` +
+          `${unbound.map((e) => `"${e.scriptFilename}"`).join(", ")} (agentScheduleEntries=` +
+          `${JSON.stringify(data?.agentScheduleEntries ?? null)}). The agent would ` +
+          `refuse to run with 409 nothing_to_run — aborting.`,
       );
     }
   }

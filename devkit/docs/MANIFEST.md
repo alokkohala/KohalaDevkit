@@ -37,7 +37,7 @@ is what goes live.
 | `toolAllowlist` | `agentToolAllowlist` | Exactly the tools the agent may call. No implicit grants. |
 | `runtimeMode` | `agentRuntimeMode` | `"wrap"` or `"llm"` (see below). |
 | `skills` | `agentSkills` | Map of skill name → script filename in `skills/`. |
-| `schedule` | `agentScheduleCron` + `agentScheduleEnabled` | Cron expression. Only used on deploy; local runs are manual. Deploy also PATCHes the schedule after the agent upsert (the platform ignores schedule fields when updating an existing agent by name) and verifies it persisted. |
+| `schedule` | `agentScheduleCron` + `agentScheduleEnabled` + `agentScheduleEntries` | Cron expression. Only used on deploy; local runs are manual. Deploy PATCHes the schedule after the skill uploads (the platform ignores schedule fields when updating an existing agent by name) and binds the cron to every deployed script via `agentScheduleEntries` — the agent-level cron alone is decorative: without a bound script the platform refuses to run with `409 nothing_to_run`. Deploy verifies both the cron and the bindings persisted. |
 | `caps.perRunTokens` | `agentPerRunTokenCap` | Hard token ceiling per shift. |
 | `caps.perDayTokens` | `agentPerDayTokenCap` | Cumulative ceiling per UTC day. |
 | `caps.billingTokens` | `agentBillingCapTokens` | Billing-period cap. Ignored locally. |
