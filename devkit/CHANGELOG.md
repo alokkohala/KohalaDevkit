@@ -1,5 +1,20 @@
 # @kohala/devkit
 
+## 0.1.6
+
+- **BUG-077 fixed: a deployed agent with a manifest `schedule` can now
+  actually run.** Deploy used to set only the agent-level cron
+  (`agentScheduleCron` + `agentScheduleEnabled`) and never bound the script,
+  leaving `agentScheduleEntries` null — four green ticks, and every trigger
+  refused with `409 nothing_to_run` because no Production script was
+  cron-invoked. The schedule step now runs *after* the skill uploads and
+  binds the cron to every deployed script via
+  `agentScheduleEntries: [{ scriptFilename, schedule }]`, then verifies each
+  filename round-tripped, failing loudly if the platform stored the cron but
+  not the binding. Deploy stays additive: with no scripts to bind,
+  `agentScheduleEntries` is not sent at all, so bindings made outside the
+  CLI are never cleared.
+
 ## 0.1.5
 
 - **BUG-069 fixed: the manifest `schedule` now actually lands on the
