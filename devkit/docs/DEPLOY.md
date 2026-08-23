@@ -44,5 +44,13 @@ platform; do that in the Kohala dashboard.
   fresh `pk_` key, or check `KOHALA_API_KEY`.
 - **403 Forbidden** — your plan does not allow the operation. Check your
   plan at kohala.ai.
+- **manual run not started: agent not enabled** — newly created agents start
+  disabled. Enable the agent in the kohala.ai dashboard, then re-run
+  `kohala deploy <agent> --run`. Enabling survives redeploys — the idempotent
+  upsert does not reset it.
+- **manual run not started: nothing to run** — the platform only executes
+  scripts bound to an active cron schedule. Add `"schedule": "..."` (a
+  5-field cron expression) to `kohala.json` and redeploy: deploy binds every
+  skill script to the schedule, which also makes manual runs work.
 
 Both messages tell you this directly; nothing is retried silently.

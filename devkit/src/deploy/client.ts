@@ -119,6 +119,25 @@ export class DeployError extends Error {
   }
 }
 
+/**
+ * Why a manual run 409'd (BUG-006: these are distinct failures that used to
+ * be conflated into one "not enabled" message):
+ * - "disabled": the agent is not enabled on the platform.
+ * - "nothing_to_run": no production script is bound to an active cron
+ *   schedule, so a run would execute nothing (fix: add `schedule` to
+ *   kohala.json and redeploy — deploy binds every skill script to it).
+ * - "other": any other 409.
+ */
+export type ManualRun409 = "disabled" | "nothing_to_run" | "other";
+
+/** Classify a 409 from POST .../agent-runs/manual by its error body. */
+export function classifyManualRun409(error: DeployError): ManualRun409 {
+  if (error.status !== 409) return "other";
+  if (/nothing_to_run|would execute nothing/i.test(error.message)) return "nothing_to_run";
+  if (/not enabled/i.test(error.message)) return "disabled";
+  return "other";
+}
+
 /** Result of the agent upsert — the platform reports created vs updated. */
 export interface AgentUpsertResult {
   id: string;

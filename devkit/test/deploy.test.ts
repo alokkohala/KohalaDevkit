@@ -3,7 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { vi } from "vitest";
-import { buildDeployPlan, DeployError, KohalaClient } from "../src/deploy/client.js";
+import { buildDeployPlan, classifyManualRun409, DeployError, KohalaClient } from "../src/deploy/client.js";
 import { manifestSchema } from "../src/manifest/schema.js";
 
 describe("buildDeployPlan", () => {
@@ -258,5 +258,29 @@ describe("buildDeployPlan schedule/skills consistency (BUG-077 review)", () => {
     } finally {
       fs.rmSync(dir, { recursive: true, force: true });
     }
+  });
+});
+
+describe("classifyManualRun409 (BUG-006)", () => {
+  it("classifies the disabled-agent 409", () => {
+    expect(
+      classifyManualRun409(
+        new DeployError(409, 'Kohala API error 409 on POST /x: {"error":"Agent is not enabled on this project"}'),
+      ),
+    ).toBe("disabled");
+  });
+  it("classifies the nothing_to_run 409", () => {
+    expect(
+      classifyManualRun409(
+        new DeployError(
+          409,
+          'Kohala API error 409 on POST /x: {"error":"nothing_to_run","message":"...so a manual run would execute nothing..."}',
+        ),
+      ),
+    ).toBe("nothing_to_run");
+  });
+  it("falls through to other for unknown 409s and non-409s", () => {
+    expect(classifyManualRun409(new DeployError(409, "something else"))).toBe("other");
+    expect(classifyManualRun409(new DeployError(500, "not enabled"))).toBe("other");
   });
 });
