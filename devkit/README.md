@@ -86,6 +86,13 @@ skill scripts).
 - Optional: `pg` + a Postgres URL for the Postgres memory backend
 - Optional: a Kohala account — **only** for `kohala deploy`
 
+### Building from source on Windows
+
+`pnpm install --frozen-lockfile` and `pnpm build` work natively on Windows
+(cmd/PowerShell) — the repository's install hooks are Node-based, no POSIX
+shell required, and the lockfile includes the Windows esbuild/Rollup native
+binaries. WSL also works if you prefer a Linux environment.
+
 ## Contributing
 
 See [CONTRIBUTING.md](CONTRIBUTING.md). Bug reports and PRs welcome.
