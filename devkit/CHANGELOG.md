@@ -1,5 +1,17 @@
 # @kohala/devkit
 
+## 0.1.7
+
+- **BUG-006 fixed: `kohala deploy --run` no longer misreports every 409 as
+  "agent not enabled".** The platform returns two distinct 409s for a manual
+  run: agent disabled, and `nothing_to_run` (no script bound to an active
+  cron schedule — the case a fresh schedule-less scaffold always hits, even
+  after enabling the agent). The CLI now tells them apart and gives the
+  right fix for each: enable the agent in the dashboard, or add a
+  `schedule` to kohala.json so deploy binds the scripts. Verified live that
+  enabling an agent survives redeploys (the upsert does not reset it).
+  DEPLOY.md documents both cases.
+
 ## 0.1.6
 
 - **BUG-077 fixed: a deployed agent with a manifest schedule can now actually
