@@ -7,7 +7,9 @@ on:
 concurrency: release-${{ github.ref }}
 
 permissions:
-  contents: read
+  # npm provenance needs id-token; creating the matching tag and GitHub
+  # Release after a successful publish needs repository contents write.
+  contents: write
   id-token: write
 
 jobs:
@@ -25,9 +27,11 @@ jobs:
       - run: npm install
       - run: npm run build
       - name: Publish to npm if version is new
+        id: package
         run: |
           PKG_NAME=$(node -p "require('./package.json').name")
           PKG_VERSION=$(node -p "require('./package.json').version")
+          echo "version=$PKG_VERSION" >> "$GITHUB_OUTPUT"
           if npm view "$PKG_NAME@$PKG_VERSION" version >/dev/null 2>&1; then
             echo "$PKG_NAME@$PKG_VERSION already published - skipping."
           else
@@ -35,3 +39,16 @@ jobs:
           fi
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+      - name: Create matching tag and GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.package.outputs.version }}
+        run: |
+          if gh release view "$VERSION" >/dev/null 2>&1; then
+            echo "GitHub release $VERSION already exists - skipping."
+          else
+            gh release create "$VERSION" \
+              --target "$GITHUB_SHA" \
+              --title "v$VERSION" \
+              --generate-notes
+          fi
