@@ -3,7 +3,8 @@ import type { Command } from "commander";
 import pc from "picocolors";
 import { loadManifest } from "../manifest/load.js";
 import { createMemoryStore } from "../memory/create.js";
-import { runShift } from "../emulator/runner.js";
+import { resolveSkill, runShift } from "../emulator/runner.js";
+import { languageForEntrypointFile } from "../manifest/language.js";
 
 /**
  * `kohala run <agent> --local` — run one shift against the local emulator.
@@ -41,6 +42,21 @@ export function registerRunCommand(program: Command): void {
         const rootDir = process.cwd();
         const agentDir = path.resolve(rootDir, agent);
         const manifest = loadManifest(agentDir);
+        // The emulator executes wrap-mode scripts with a Python interpreter.
+        // A TypeScript/JavaScript skill deploys fine but has no local lane
+        // yet, so say that instead of spawning python3 on a .ts file and
+        // reporting its syntax error as the agent's failure.
+        if (manifest.runtimeMode === "wrap") {
+          const [skillName, scriptFilename] = resolveSkill(manifest, options.skill);
+          if (languageForEntrypointFile(scriptFilename) === "node") {
+            throw new Error(
+              `Skill "${skillName}" is a TypeScript/JavaScript script (${scriptFilename}), and the ` +
+                `local emulator runs Python skills only. Deploy it with \`kohala deploy ${agent}\` ` +
+                `and run it on the platform (\`--run\`), or run the file yourself with your own ` +
+                `Node toolchain.`,
+            );
+          }
+        }
         const store = await createMemoryStore({
           backend: options.backend,
           agent: manifest.name,
