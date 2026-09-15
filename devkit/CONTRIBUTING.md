@@ -30,6 +30,8 @@ npm run build       # tsup -> dist/
 same dependency tree. When changing dependencies, run `npm install` from the
 `devkit` directory and commit both `package.json` and `package-lock.json`.
 Use `npm ci` when you only need to install the committed dependency tree.
+CI pins npm 11.6.0 to avoid an npm 10 peer-resolution crash; use the same npm
+version when intentionally regenerating the lockfile.
 
 ## Ground rules
 
