@@ -30,6 +30,9 @@ npm run build       # tsup -> dist/
 same dependency tree. When changing dependencies, run `npm install` from the
 `devkit` directory and commit both `package.json` and `package-lock.json`.
 Use `npm ci` when you only need to install the committed dependency tree.
+Keep the checked-in `.npmrc` enabled when updating the lockfile: it avoids an
+npm peer-resolution crash and ensures local installs use the same settings as
+CI.
 
 ## Ground rules
 
