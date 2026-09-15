@@ -10,6 +10,7 @@ import { evaluateValidators, type ValidatorResult } from "./validators.js";
 import { startSdkRpcServer } from "../sdk/rpc.js";
 import { runLlmShift } from "./llm-mode.js";
 import { findPython } from "./python.js";
+import { fileURLToPath } from "node:url";
 
 /**
  * The shift runner — executes one agent shift with the platform's exact
@@ -169,9 +170,13 @@ export async function runShift(options: RunShiftOptions): Promise<ShiftResult> {
       throw new Error("repair loop exited without a result");
     } catch (error) {
       if (error instanceof CapExceededError || meter.abortedWith) {
-        const cap = (error instanceof CapExceededError ? error : meter.abortedWith) as CapExceededError;
+        const cap = (
+          error instanceof CapExceededError ? error : meter.abortedWith
+        ) as CapExceededError;
         const status: RunStatus =
-          cap.code === "PER_RUN_TOKEN_CAP" ? "aborted_per_run_token_cap" : "aborted_per_day_token_cap";
+          cap.code === "PER_RUN_TOKEN_CAP"
+            ? "aborted_per_run_token_cap"
+            : "aborted_per_day_token_cap";
         return finish(status, "", [], cap.message);
       }
       return finish("error", "", [], (error as Error).message);
@@ -208,7 +213,12 @@ export async function runShift(options: RunShiftOptions): Promise<ShiftResult> {
       if (!execution.ok) {
         // A cap abort inside the script (llm.complete denied) surfaces here.
         if (meter.abortedWith?.code === "PER_RUN_TOKEN_CAP") {
-          return finish("aborted_per_run_token_cap", execution.stdout, [], meter.abortedWith.message);
+          return finish(
+            "aborted_per_run_token_cap",
+            execution.stdout,
+            [],
+            meter.abortedWith.message,
+          );
         }
         return finish("error", execution.stdout, [], execution.errorDetail);
       }
@@ -224,9 +234,16 @@ export async function runShift(options: RunShiftOptions): Promise<ShiftResult> {
       if (failures.length === 0) {
         return finish("succeeded", execution.stdout, validatorResults);
       }
-      repairReason = failures.map((failure) => `${failure.validator}: ${failure.detail}`).join("; ");
+      repairReason = failures
+        .map((failure) => `${failure.validator}: ${failure.detail}`)
+        .join("; ");
       if (attempt === MAX_REPAIR_ATTEMPTS) {
-        return finish("failed", execution.stdout, validatorResults, `validators failed after ${MAX_REPAIR_ATTEMPTS} repair attempts: ${repairReason}`);
+        return finish(
+          "failed",
+          execution.stdout,
+          validatorResults,
+          `validators failed after ${MAX_REPAIR_ATTEMPTS} repair attempts: ${repairReason}`,
+        );
       }
     }
     // Unreachable: the loop always returns.
@@ -277,10 +294,29 @@ interface ScriptExecution {
  * debugging and never treated as output.
  */
 async function executeScript(options: ExecuteScriptOptions): Promise<ScriptExecution> {
-  const python = await findPython();
   const scriptPath = path.join(options.agentDir, "skills", options.scriptFilename);
+  const extension = path.extname(options.scriptFilename).toLowerCase();
+  let command: string;
+  let args: string[];
+  if (extension === ".py") {
+    command = await findPython();
+    args = [scriptPath];
+  } else if (extension === ".ts" || extension === ".mts" || extension === ".cts") {
+    command = process.execPath;
+    const tsxCli = fileURLToPath(import.meta.resolve("tsx/cli"));
+    args = [tsxCli, scriptPath];
+  } else if (extension === ".js" || extension === ".mjs" || extension === ".cjs") {
+    command = process.execPath;
+    args = [scriptPath];
+  } else {
+    return {
+      ok: false,
+      stdout: "",
+      errorDetail: `Unsupported skill script extension "${extension || "(none)"}". Use .py, .ts, .mts, .cts, .js, .mjs, or .cjs.`,
+    };
+  }
   try {
-    const result = await execa(python, [scriptPath], {
+    const result = await execa(command, args, {
       cwd: options.agentDir,
       env: {
         KOHALA_RPC_URL: options.rpcUrl,

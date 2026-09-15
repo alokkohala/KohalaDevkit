@@ -10,12 +10,14 @@ kohala --version
 kohala doctor        # checks Node, Python, keys
 ```
 
-Requirements: Node.js ≥ 20 and Python 3 on your PATH.
+Requirements: Node.js ≥ 20. Python 3 is also required for Python agents.
 
 ## Create an agent
 
 ```bash
 kohala init my-agent
+# Or scaffold TypeScript:
+kohala init my-ts-agent --language ts
 ```
 
 This scaffolds:
@@ -28,6 +30,10 @@ my-agent/
     ├── main.py        # the skill — its stdout is the run output
     └── _tools.py      # the local tool SDK (stdlib-only, don't edit)
 ```
+
+The TypeScript scaffold uses `skills/main.ts` and `skills/_tools.ts`, and also
+includes a strict `tsconfig.json` plus `package.json` with its development
+dependencies declared.
 
 ## Run it
 
@@ -54,7 +60,7 @@ there.
 
 ## Iterate
 
-Edit `my-agent/skills/main.py` and `my-agent/kohala.json`, then run again.
+Edit `my-agent/skills/main.py` (or `main.ts`) and `my-agent/kohala.json`, then run again.
 Try removing a tool from `toolAllowlist` and watch the call fail loudly with
 `TOOL_DENIED` — that is exactly what the platform would do.
 

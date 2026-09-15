@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import type { ZodError, ZodIssue } from "zod";
-import { manifestSchema, type AgentManifest } from "./schema.js";
+import { crossFieldProblems, manifestSchema, type AgentManifest } from "./schema.js";
 
 /** Error thrown when a kohala.json cannot be read, parsed, or validated. */
 export class ManifestError extends Error {
@@ -25,7 +25,8 @@ const FIELD_HINTS: Record<string, string> = {
   charter: "write the agent's mission as a non-empty string",
   toolAllowlist: 'list allowed tool names, e.g. ["s3.put", "http.post_json"]',
   runtimeMode: 'must be "wrap" (script wrapper) or "llm" (tool-use loop)',
-  skills: 'map skill name to script filename, e.g. {"collect": "main.py"}',
+  skills: 'map skill name to script filename, e.g. {"collect": "main.py"} or {"collect": "main.ts"}',
+  dependencies: 'list npm packages the TypeScript/JavaScript skills import, e.g. ["zod"]',
   schedule: 'use a cron expression like "0 9 * * *" (only used on deploy)',
   caps: "set caps.perRunTokens and caps.perDayTokens as positive integers",
   validators: 'each validator needs a "type" of "shape", "freshness" or "invariant"',
@@ -84,6 +85,13 @@ export function loadManifest(agentDir: string): AgentManifest {
   const result = manifestSchema.safeParse(parsed);
   if (!result.success) {
     throw new ManifestError(`${filePath} failed validation`, formatManifestIssues(result.error));
+  }
+  // Field-level parsing cannot see across fields (e.g. npm packages declared
+  // by a project with no TypeScript skill); those problems are reported the
+  // same way, so a manifest is never returned half-valid.
+  const crossField = crossFieldProblems(result.data);
+  if (crossField.length > 0) {
+    throw new ManifestError(`${filePath} failed validation`, crossField);
   }
   return result.data;
 }

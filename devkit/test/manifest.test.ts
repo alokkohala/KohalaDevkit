@@ -3,7 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { loadManifest, ManifestError } from "../src/manifest/load.js";
-import { manifestSchema } from "../src/manifest/schema.js";
+import { crossFieldProblems, manifestSchema } from "../src/manifest/schema.js";
 
 const VALID = {
   name: "test-agent",
@@ -17,7 +17,11 @@ const VALID = {
 
 describe("manifestSchema", () => {
   it("accepts a valid manifest and applies defaults", () => {
-    const parsed = manifestSchema.parse({ ...VALID, toolAllowlist: undefined, validators: undefined });
+    const parsed = manifestSchema.parse({
+      ...VALID,
+      toolAllowlist: undefined,
+      validators: undefined,
+    });
     expect(parsed.toolAllowlist).toEqual([]);
     expect(parsed.validators).toEqual([]);
   });
@@ -97,5 +101,48 @@ describe("loadManifest", () => {
       expect(problems).toContain("caps.perRunTokens");
       expect(problems).toContain("hint:");
     }
+  });
+});
+
+describe("skill scripts and npm dependencies (TypeScript lane)", () => {
+  it("accepts a TypeScript skill script", () => {
+    const parsed = manifestSchema.parse({ ...VALID, skills: { main: "main.ts" } });
+    expect(parsed.skills.main).toBe("main.ts");
+  });
+
+  it("rejects a skill file the platform cannot run", () => {
+    const parsed = manifestSchema.parse({ ...VALID, skills: { main: "main.rb" } });
+    expect(crossFieldProblems(parsed).join(" ")).toContain(".ts");
+  });
+
+  it("allows prompt files for LLM-mode skills", () => {
+    const parsed = manifestSchema.parse({
+      ...VALID,
+      runtimeMode: "llm",
+      skills: { observe: "task.md" },
+    });
+    expect(crossFieldProblems(parsed)).toEqual([]);
+  });
+
+  it("defaults dependencies to an empty list", () => {
+    expect(manifestSchema.parse(VALID).dependencies).toEqual([]);
+  });
+
+  it("keeps declared npm packages", () => {
+    const parsed = manifestSchema.parse({
+      ...VALID,
+      skills: { main: "main.ts" },
+      dependencies: ["zod"],
+    });
+    expect(parsed.dependencies).toEqual(["zod"]);
+  });
+
+  it("reports npm packages declared without any TypeScript/JavaScript skill", () => {
+    const parsed = manifestSchema.parse({ ...VALID, dependencies: ["zod"] });
+    expect(crossFieldProblems(parsed).join(" ")).toContain("no skill is a TypeScript/JavaScript");
+  });
+
+  it("has no cross-field problems for a Python-only manifest", () => {
+    expect(crossFieldProblems(manifestSchema.parse(VALID))).toEqual([]);
   });
 });

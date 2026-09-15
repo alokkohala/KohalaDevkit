@@ -3,7 +3,14 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { vi } from "vitest";
-import { buildDeployPlan, classifyManualRun409, DeployError, KohalaClient } from "../src/deploy/client.js";
+import {
+  buildDeployPlan,
+  classifyManualRun409,
+  DeployError,
+  KohalaClient,
+  readableApiError,
+  skillPayloadLanguage,
+} from "../src/deploy/client.js";
 import { manifestSchema } from "../src/manifest/schema.js";
 
 describe("buildDeployPlan", () => {
@@ -282,5 +289,130 @@ describe("classifyManualRun409 (BUG-006)", () => {
   it("falls through to other for unknown 409s and non-409s", () => {
     expect(classifyManualRun409(new DeployError(409, "something else"))).toBe("other");
     expect(classifyManualRun409(new DeployError(500, "not enabled"))).toBe("other");
+  });
+});
+
+describe("buildDeployPlan — TypeScript/JavaScript skills", () => {
+  let agentDir: string;
+
+  beforeEach(() => {
+    agentDir = fs.mkdtempSync(path.join(os.tmpdir(), "kohala-deploy-ts-"));
+    fs.mkdirSync(path.join(agentDir, "skills"));
+    fs.writeFileSync(path.join(agentDir, "skills", "main.ts"), "export async function run() {}\n");
+    fs.writeFileSync(path.join(agentDir, "skills", "legacy.py"), "print('hi')\n");
+  });
+  afterEach(() => {
+    fs.rmSync(agentDir, { recursive: true, force: true });
+  });
+
+  const manifestFor = (skills: Record<string, string>, dependencies?: string[]) =>
+    manifestSchema.parse({
+      name: "ts-agent",
+      charter: "Do things.",
+      toolAllowlist: ["s3.put"],
+      runtimeMode: "wrap",
+      skills,
+      ...(dependencies ? { dependencies } : {}),
+      caps: { perRunTokens: 10, perDayTokens: 20 },
+    });
+
+  it("declares the Node lane and the npm packages for a .ts skill", () => {
+    const plan = buildDeployPlan(manifestFor({ main: "main.ts" }, ["zod"]), agentDir);
+    expect(plan.skills[0]).toMatchObject({
+      name: "main",
+      scriptFilename: "main.ts",
+      runtimeLanguage: "node",
+      scriptDependencies: ["zod"],
+      code: "export async function run() {}\n",
+    });
+  });
+
+  it("omits scriptDependencies when none are declared", () => {
+    const plan = buildDeployPlan(manifestFor({ main: "main.ts" }), agentDir);
+    expect(plan.skills[0]?.runtimeLanguage).toBe("node");
+    expect(plan.skills[0]).not.toHaveProperty("scriptDependencies");
+  });
+
+  it("leaves a Python skill's payload exactly as it was", () => {
+    const plan = buildDeployPlan(manifestFor({ legacy: "legacy.py" }), agentDir);
+    expect(Object.keys(plan.skills[0] ?? {}).sort()).toEqual([
+      "code",
+      "description",
+      "name",
+      "scriptFilename",
+    ]);
+  });
+
+  it("sends the packages only with the Node skill of a mixed project", () => {
+    const plan = buildDeployPlan(
+      manifestFor({ main: "main.ts", legacy: "legacy.py" }, ["zod"]),
+      agentDir,
+    );
+    const byName = Object.fromEntries(plan.skills.map((skill) => [skill.name, skill]));
+    expect(byName.main?.scriptDependencies).toEqual(["zod"]);
+    expect(byName.legacy).not.toHaveProperty("runtimeLanguage");
+    expect(byName.legacy).not.toHaveProperty("scriptDependencies");
+  });
+
+  it("labels a planned upload's lane", () => {
+    const plan = buildDeployPlan(manifestFor({ main: "main.ts", legacy: "legacy.py" }), agentDir);
+    const byName = Object.fromEntries(plan.skills.map((skill) => [skill.name, skill]));
+    expect(skillPayloadLanguage(byName.main!)).toBe("node");
+    expect(skillPayloadLanguage(byName.legacy!)).toBe("python");
+  });
+});
+
+describe("readableApiError", () => {
+  it("surfaces the platform's message from a JSON error envelope", () => {
+    const body = JSON.stringify({
+      error:
+        '[Kohala Security Service] Script rejected: unsupported npm dependencies for framework "custom": axios. Supported packages: zod',
+      gateRejected: true,
+      reasons: [{ kind: "dependency" }],
+    });
+    const message = readableApiError(body);
+    expect(message).toContain("unsupported npm dependencies");
+    expect(message).not.toContain("gateRejected");
+  });
+
+  it("joins error and message when the platform sends both", () => {
+    expect(readableApiError(JSON.stringify({ error: "nothing_to_run", message: "no script" }))).toBe(
+      "nothing_to_run — no script",
+    );
+  });
+
+  it("falls back to the raw body when it is not a JSON envelope", () => {
+    expect(readableApiError("<html>502</html>")).toBe("<html>502</html>");
+    expect(readableApiError(JSON.stringify({ unexpected: true }))).toContain("unexpected");
+  });
+});
+
+describe("KohalaClient.upsertSkill — gate rejection", () => {
+  it("reports the platform's refusal message on a 400", async () => {
+    const rejection =
+      '[Kohala Security Service] Script rejected: unsupported npm dependencies for framework "custom": axios. Supported packages: zod';
+    vi.stubGlobal(
+      "fetch",
+      vi
+        .fn()
+        .mockResolvedValue(
+          new Response(JSON.stringify({ error: rejection, gateRejected: true }), { status: 400 }),
+        ),
+    );
+    try {
+      const client = new KohalaClient("pk_test", "https://example.test");
+      await expect(
+        client.upsertSkill("316", {
+          name: "main",
+          scriptFilename: "main.ts",
+          description: "d",
+          code: "export {};",
+          runtimeLanguage: "node",
+          scriptDependencies: ["axios"],
+        }),
+      ).rejects.toThrow(/unsupported npm dependencies/);
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 });
