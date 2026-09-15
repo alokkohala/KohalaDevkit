@@ -36,13 +36,57 @@ is what goes live.
 | `charter` | `agentCharter` | The agent's mission. In llm mode this is the system prompt. |
 | `toolAllowlist` | `agentToolAllowlist` | Exactly the tools the agent may call. No implicit grants. |
 | `runtimeMode` | `agentRuntimeMode` | `"wrap"` or `"llm"` (see below). |
-| `skills` | `agentSkills` | Map of skill name → script filename in `skills/`. |
+| `skills` | `agentSkills` | Map of skill name → script filename in `skills/`. The extension picks the runtime (see below). |
+| `dependencies` | `scriptDependencies` | npm packages the TypeScript/JavaScript skills import. Allowlisted packages only; omit for Python agents. |
 | `schedule` | `agentScheduleCron` + `agentScheduleEnabled` + `agentScheduleEntries` | Cron expression. Only used on deploy; local runs are manual. After uploading the skills, deploy PATCHes the schedule (the platform ignores schedule fields when updating an existing agent by name) **and binds every skill script to the cron via `agentScheduleEntries`** — without the binding the platform has nothing to run (409 `nothing_to_run`). The round-trip is verified. |
 | `caps.perRunTokens` | `agentPerRunTokenCap` | Hard token ceiling per shift. |
 | `caps.perDayTokens` | `agentPerDayTokenCap` | Cumulative ceiling per UTC day. |
 | `caps.billingTokens` | `agentBillingCapTokens` | Billing-period cap. Ignored locally. |
 | `caps.billingPeriod` | `agentBillingCapPeriod` | `"day"`, `"week"`, or `"month"`. Required with `billingTokens`. |
 | `validators` | agent validators | Output checks (below). |
+
+## Script languages
+
+A skill script can be Python or TypeScript/JavaScript. **The file extension
+decides which runtime the platform executes it in** — the same rule the
+platform applies, so what `kohala validate` reports is what runs hosted:
+
+| Extension | Runtime |
+| --- | --- |
+| `.py` | Python |
+| `.ts`, `.mts`, `.cts`, `.js`, `.mjs`, `.cjs` | TypeScript/JavaScript |
+
+Anything else is refused by `kohala validate` — the platform would store the
+skill and never run it.
+
+```json
+{
+  "skills": { "collect": "main.ts" },
+  "dependencies": ["zod", "date-fns"]
+}
+```
+
+`dependencies` lists the npm packages your TypeScript skills import beyond
+Node's standard library, and is sent with the script on deploy. Only packages
+the platform pre-installs are accepted:
+
+`@ai-sdk/anthropic`, `@ai-sdk/openai`, `@anthropic-ai/sdk`, `ai`, `cheerio`,
+`date-fns`, `js-yaml`, `openai`, `zod`
+
+HTTP clients (`axios`, `node-fetch`, `undici`, …) are deliberately absent:
+the hosted runtime meters egress through the global `fetch`. `kohala
+validate` and `kohala deploy` refuse anything off the list **before** the
+deploy request, with the platform's own message; `--allow-unknown-packages`
+skips the local check if the CLI's snapshot is behind (the platform still
+enforces the live list).
+
+`dependencies` is npm-only. Python skills cannot install pip packages from
+the CLI, so declaring packages without a `.ts`/`.js` skill is a validation
+error rather than a silently ignored field.
+
+**Local runs:** `kohala run --local` executes Python skills only. A
+TypeScript skill deploys and runs hosted; locally the CLI says so instead of
+handing the file to `python3`.
 
 ## Runtime modes
 

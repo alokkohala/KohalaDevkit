@@ -179,3 +179,85 @@ describe("kohala CLI end to end", () => {
     expect(result.stdout).toContain("python");
   });
 });
+
+describe("kohala CLI with a TypeScript agent", () => {
+  const agent = "e2e-ts-agent";
+
+  function writeManifest(extra: Record<string, unknown> = {}): void {
+    const dir = path.join(workDir, agent);
+    fs.mkdirSync(path.join(dir, "skills"), { recursive: true });
+    fs.writeFileSync(
+      path.join(dir, "skills", "main.ts"),
+      "export async function run(): Promise<void> {\n  console.log('hello');\n}\n",
+    );
+    fs.writeFileSync(
+      path.join(dir, "kohala.json"),
+      JSON.stringify(
+        {
+          name: agent,
+          charter: "Report the weather in TypeScript.",
+          toolAllowlist: ["s3.put"],
+          runtimeMode: "wrap",
+          skills: { main: "main.ts" },
+          caps: { perRunTokens: 1000, perDayTokens: 5000 },
+          validators: [],
+          ...extra,
+        },
+        null,
+        2,
+      ),
+    );
+  }
+
+  it("validate accepts a .ts skill and reports the detected language", async () => {
+    writeManifest({ dependencies: ["zod"] });
+    const result = await kohala(["validate", agent]);
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toContain("language=node");
+    expect(result.stdout).toContain("skills/main.ts (TypeScript/JavaScript)");
+    expect(result.stdout).toContain("npm packages: zod");
+  });
+
+  it("validate rejects a package outside the platform allowlist", async () => {
+    writeManifest({ dependencies: ["axios"] });
+    const result = await kohala(["validate", agent]);
+    expect(result.exitCode).toBe(1);
+    expect(result.stderr).toContain('unsupported npm dependencies for framework "custom": axios');
+    expect(result.stderr).toContain("Supported packages:");
+
+    const allowed = await kohala(["validate", agent, "--allow-unknown-packages"]);
+    expect(allowed.exitCode).toBe(0);
+    expect(allowed.stderr).toContain("warning:");
+  });
+
+  it("validate rejects a skill file no runtime can execute", async () => {
+    writeManifest({ skills: { main: "main.rb" } });
+    const result = await kohala(["validate", agent]);
+    expect(result.exitCode).toBe(1);
+    expect(result.stderr).toContain(".ts");
+  });
+
+  it("deploy --dry-run sends runtimeLanguage and scriptDependencies", async () => {
+    writeManifest({ dependencies: ["zod"] });
+    const result = await kohala(["deploy", agent, "--dry-run"]);
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toContain('"runtimeLanguage": "node"');
+    expect(result.stdout).toContain('"scriptDependencies"');
+    expect(result.stdout).toContain("TypeScript/JavaScript");
+  });
+
+  it("deploy refuses a non-allowlisted package before contacting the platform", async () => {
+    writeManifest({ dependencies: ["axios"] });
+    const result = await kohala(["deploy", agent, "--dry-run"]);
+    expect(result.exitCode).toBe(1);
+    expect(result.stderr).toContain('unsupported npm dependencies for framework "custom": axios');
+    expect(result.stdout).not.toContain("POST /api/v1/agents");
+  });
+
+  it("run --local says the emulator has no TypeScript lane instead of spawning python", async () => {
+    writeManifest();
+    const result = await kohala(["run", agent, "--local"]);
+    expect(result.exitCode).toBe(1);
+    expect(result.stderr).toContain("local emulator runs Python skills only");
+  });
+});
