@@ -24,6 +24,13 @@ npm test            # vitest (unit + CLI e2e)
 npm run build       # tsup -> dist/
 ```
 
+## Updating dependencies
+
+`devkit/package-lock.json` is committed so CI and local development install the
+same dependency tree. When changing dependencies, run `npm install` from the
+`devkit` directory and commit both `package.json` and `package-lock.json`.
+Use `npm ci` when you only need to install the committed dependency tree.
+
 ## Ground rules
 
 - **Errors fail loudly.** No silent fallbacks, no mock LLM responses, no
