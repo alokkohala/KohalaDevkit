@@ -8,9 +8,7 @@ import { manifestSchema } from "../manifest/schema.js";
 /**
  * `kohala init <name>` — scaffold a new agent from templates/.
  *
- * The scaffold is a complete, runnable agent: kohala.json, skills/main.py (a
- * working example that writes to memory), skills/_tools.py (the local SDK),
- * and a README. `kohala run <name> --local` works immediately after init.
+ * The scaffold is a complete, runnable Python or TypeScript agent.
  */
 
 /** Locate the templates directory relative to the built CLI bundle. */
@@ -22,9 +20,11 @@ function templatesDir(): string {
     path.resolve(here, "..", "..", "..", "templates"),
   ];
   for (const candidate of candidates) {
-    if (fs.existsSync(path.join(candidate, "kohala.json"))) return candidate;
+    if (fs.existsSync(path.join(candidate, "python", "kohala.json"))) return candidate;
   }
-  throw new Error(`Could not locate the devkit templates directory (looked in: ${candidates.join(", ")})`);
+  throw new Error(
+    `Could not locate the devkit templates directory (looked in: ${candidates.join(", ")})`,
+  );
 }
 
 /** Recursively copy the template tree, substituting {{AGENT_NAME}}. */
@@ -46,8 +46,9 @@ export function registerInitCommand(program: Command): void {
   program
     .command("init")
     .argument("<name>", "agent name (also the directory name)")
+    .option("--language <language>", "scaffold language: python or ts", "python")
     .description("Scaffold a new agent: kohala.json, a working skill, and the local SDK")
-    .action((name: string) => {
+    .action((name: string, options: { language: string }) => {
       const nameCheck = manifestSchema.shape.name.safeParse(name);
       if (!nameCheck.success) {
         throw new Error(
@@ -58,7 +59,17 @@ export function registerInitCommand(program: Command): void {
       if (fs.existsSync(targetDir)) {
         throw new Error(`${targetDir} already exists — pick a new name or remove the directory.`);
       }
-      copyTemplates(templatesDir(), targetDir, name);
+      const language = options.language.toLowerCase();
+      const template =
+        language === "ts" || language === "typescript"
+          ? "typescript"
+          : language === "py" || language === "python"
+            ? "python"
+            : null;
+      if (!template) {
+        throw new Error(`Unsupported language "${options.language}". Choose "python" or "ts".`);
+      }
+      copyTemplates(path.join(templatesDir(), template), targetDir, name);
       console.log(pc.green(`Created agent "${name}" in ${targetDir}`));
       console.log("");
       console.log("Next steps:");

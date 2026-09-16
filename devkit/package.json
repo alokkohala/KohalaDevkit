@@ -1,6 +1,6 @@
 {
   "name": "@kohala/devkit",
-  "version": "0.1.7",
+  "version": "0.2.0",
   "description": "Open-source CLI, local agent emulator, and open MCP memory server for Kohala agents. Build and run agents entirely on your own machine — then push the same agent to Kohala when you want it hosted.",
   "license": "MIT",
   "type": "module",
@@ -68,6 +68,7 @@
     "execa": "^9.6.1",
     "ora": "^9.4.1",
     "picocolors": "^1.1.1",
+    "tsx": "^4.21.0",
     "zod": "^3.25.76"
   },
   "devDependencies": {

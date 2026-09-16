@@ -12,10 +12,14 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
  */
 const here = path.dirname(fileURLToPath(import.meta.url));
 const CLI = path.resolve(here, "..", "dist", "cli", "index.js");
+const TSC = fileURLToPath(import.meta.resolve("typescript/lib/tsc.js"));
 
 let workDir: string;
 
-async function kohala(args: string[], options: { cwd?: string; env?: Record<string, string> } = {}) {
+async function kohala(
+  args: string[],
+  options: { cwd?: string; env?: Record<string, string> } = {},
+) {
   return execa("node", [CLI, ...args], {
     cwd: options.cwd ?? workDir,
     env: options.env,
@@ -58,6 +62,52 @@ describe("kohala CLI end to end", () => {
     expect(result.stderr).toContain("already exists");
   });
 
+  it("init --language ts scaffolds, validates, runs, and dry-run deploys", async () => {
+    const init = await kohala(["init", "e2e-ts-agent", "--language", "ts"]);
+    expect(init.exitCode).toBe(0);
+
+    const agentDir = path.join(workDir, "e2e-ts-agent");
+    expect(fs.existsSync(path.join(agentDir, "kohala.json"))).toBe(true);
+    expect(fs.existsSync(path.join(agentDir, "package.json"))).toBe(true);
+    expect(fs.existsSync(path.join(agentDir, "tsconfig.json"))).toBe(true);
+    expect(fs.existsSync(path.join(agentDir, "skills", "main.ts"))).toBe(true);
+    expect(fs.existsSync(path.join(agentDir, "skills", "_tools.ts"))).toBe(true);
+
+    const manifest = fs.readFileSync(path.join(agentDir, "kohala.json"), "utf8");
+    expect(manifest).toContain('"name": "e2e-ts-agent"');
+    expect(manifest).toContain('"main": "main.ts"');
+    expect(manifest).toContain('"dependencies": []');
+
+    const validate = await kohala(["validate", "e2e-ts-agent"]);
+    expect(validate.exitCode).toBe(0);
+    expect(validate.stdout).toContain("is valid");
+
+    const typecheck = await execa(
+      "node",
+      [
+        TSC,
+        "--project",
+        path.join(agentDir, "tsconfig.json"),
+        "--typeRoots",
+        path.resolve(here, "..", "node_modules", "@types"),
+      ],
+      {
+        reject: false,
+      },
+    );
+    expect(typecheck.exitCode, typecheck.stderr || typecheck.stdout).toBe(0);
+
+    const run = await kohala(["run", "e2e-ts-agent", "--local"]);
+    expect(run.exitCode).toBe(0);
+    expect(run.stdout).toContain("succeeded");
+
+    const deploy = await kohala(["deploy", "e2e-ts-agent", "--dry-run"]);
+    expect(deploy.exitCode).toBe(0);
+    expect(deploy.stdout).toContain("main.ts");
+    expect(deploy.stdout).toContain('"runtimeLanguage": "node"');
+    expect(deploy.stdout).toContain("POST /api/v1/agents");
+  });
+
   it("validate accepts the scaffold and rejects a broken manifest", async () => {
     const good = await kohala(["validate", "e2e-agent"]);
     expect(good.exitCode).toBe(0);
@@ -72,6 +122,13 @@ describe("kohala CLI end to end", () => {
     expect(bad.exitCode).toBe(1);
     expect(bad.stderr).toContain("runtimeMode");
     fs.writeFileSync(manifestPath, original);
+  });
+
+  it("validate preserves LLM-mode prompt-file skills", async () => {
+    const example = path.resolve(here, "..", "examples", "llm-notes");
+    const result = await kohala(["validate", example]);
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toContain("is valid");
   });
 
   it("validate rejects unknown tool ids and honors --allow-unknown-tools", async () => {
@@ -103,9 +160,9 @@ describe("kohala CLI end to end", () => {
     expect(result.stdout).toContain("succeeded");
     expect(result.stdout).toContain("never billed");
     expect(fs.existsSync(path.join(workDir, ".kohala", "trace", "e2e-agent.jsonl"))).toBe(true);
-    expect(
-      fs.existsSync(path.join(workDir, ".kohala", "memory", "e2e-agent", "index.json")),
-    ).toBe(true);
+    expect(fs.existsSync(path.join(workDir, ".kohala", "memory", "e2e-agent", "index.json"))).toBe(
+      true,
+    );
   });
 
   it("run without --local refuses with guidance", async () => {
@@ -177,5 +234,87 @@ describe("kohala CLI end to end", () => {
     expect(result.exitCode).toBe(0);
     expect(result.stdout).toContain("node");
     expect(result.stdout).toContain("python");
+  });
+});
+
+describe("kohala CLI with a TypeScript agent", () => {
+  const agent = "e2e-ts-agent";
+
+  function writeManifest(extra: Record<string, unknown> = {}): void {
+    const dir = path.join(workDir, agent);
+    fs.mkdirSync(path.join(dir, "skills"), { recursive: true });
+    fs.writeFileSync(
+      path.join(dir, "skills", "main.ts"),
+      "export async function run(): Promise<void> {\n  console.log('hello');\n}\n",
+    );
+    fs.writeFileSync(
+      path.join(dir, "kohala.json"),
+      JSON.stringify(
+        {
+          name: agent,
+          charter: "Report the weather in TypeScript.",
+          toolAllowlist: ["s3.put"],
+          runtimeMode: "wrap",
+          skills: { main: "main.ts" },
+          caps: { perRunTokens: 1000, perDayTokens: 5000 },
+          validators: [],
+          ...extra,
+        },
+        null,
+        2,
+      ),
+    );
+  }
+
+  it("validate accepts a .ts skill and reports the detected language", async () => {
+    writeManifest({ dependencies: ["zod"] });
+    const result = await kohala(["validate", agent]);
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toContain("language=node");
+    expect(result.stdout).toContain("skills/main.ts (TypeScript/JavaScript)");
+    expect(result.stdout).toContain("npm packages: zod");
+  });
+
+  it("validate rejects a package outside the platform allowlist", async () => {
+    writeManifest({ dependencies: ["axios"] });
+    const result = await kohala(["validate", agent]);
+    expect(result.exitCode).toBe(1);
+    expect(result.stderr).toContain('unsupported npm dependencies for framework "custom": axios');
+    expect(result.stderr).toContain("Supported packages:");
+
+    const allowed = await kohala(["validate", agent, "--allow-unknown-packages"]);
+    expect(allowed.exitCode).toBe(0);
+    expect(allowed.stderr).toContain("warning:");
+  });
+
+  it("validate rejects a skill file no runtime can execute", async () => {
+    writeManifest({ skills: { main: "main.rb" } });
+    const result = await kohala(["validate", agent]);
+    expect(result.exitCode).toBe(1);
+    expect(result.stderr).toContain(".ts");
+  });
+
+  it("deploy --dry-run sends runtimeLanguage and scriptDependencies", async () => {
+    writeManifest({ dependencies: ["zod"] });
+    const result = await kohala(["deploy", agent, "--dry-run"]);
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toContain('"runtimeLanguage": "node"');
+    expect(result.stdout).toContain('"scriptDependencies"');
+    expect(result.stdout).toContain("TypeScript/JavaScript");
+  });
+
+  it("deploy refuses a non-allowlisted package before contacting the platform", async () => {
+    writeManifest({ dependencies: ["axios"] });
+    const result = await kohala(["deploy", agent, "--dry-run"]);
+    expect(result.exitCode).toBe(1);
+    expect(result.stderr).toContain('unsupported npm dependencies for framework "custom": axios');
+    expect(result.stdout).not.toContain("POST /api/v1/agents");
+  });
+
+  it("run --local executes a TypeScript skill with Node instead of Python", async () => {
+    writeManifest();
+    const result = await kohala(["run", agent, "--local"]);
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toContain("succeeded");
   });
 });

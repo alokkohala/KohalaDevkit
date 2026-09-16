@@ -9,7 +9,10 @@ import {
   DEFAULT_BASE_URL,
   DeployError,
   KohalaClient,
+  skillPayloadLanguage,
 } from "../deploy/client.js";
+import { LANGUAGE_LABEL } from "../manifest/language.js";
+import { npmAllowlistMessage, rejectedNpmPackages } from "../manifest/npm-packages.js";
 
 /**
  * `kohala deploy <agent>` — push a locally-validated agent to the hosted
@@ -23,14 +26,42 @@ export function registerDeployCommand(program: Command): void {
     .option("--dry-run", "print the payloads without sending anything")
     .option("--base-url <url>", "API base URL", DEFAULT_BASE_URL)
     .option("--run", "trigger a manual run after deploying")
+    .option(
+      "--allow-unknown-packages",
+      "do not fail on npm packages missing from the bundled allowlist snapshot",
+    )
     .description("Deploy an agent to kohala.ai (idempotent on agent name)")
     .action(
       async (
         agent: string,
-        options: { dryRun?: boolean; baseUrl: string; run?: boolean },
+        options: {
+          dryRun?: boolean;
+          baseUrl: string;
+          run?: boolean;
+          allowUnknownPackages?: boolean;
+        },
       ) => {
         const agentDir = path.resolve(process.cwd(), agent);
         const manifest = loadManifest(agentDir);
+
+        // The platform's attach-time gate refuses a script declaring a
+        // package outside its npm allowlist, so the deploy would fail
+        // mid-flight after the agent was already upserted. Refuse it here,
+        // before anything is sent, with the platform's own message.
+        const rejected = rejectedNpmPackages(manifest.dependencies);
+        if (rejected.length > 0) {
+          const message = npmAllowlistMessage(rejected);
+          if (options.allowUnknownPackages) {
+            console.warn(pc.yellow(`warning: ${message}`));
+          } else {
+            throw new Error(
+              `${message}\n  The platform refuses these when the script is attached, so this deploy ` +
+                `would fail. Remove them, or re-run with --allow-unknown-packages if the bundled ` +
+                `snapshot is stale (the deploy endpoint still enforces the live allowlist).`,
+            );
+          }
+        }
+
         const plan = buildDeployPlan(manifest, agentDir);
 
         if (options.dryRun) {
@@ -40,7 +71,12 @@ export function registerDeployCommand(program: Command): void {
           console.log(JSON.stringify(plan.agent, null, 2));
           for (const skill of plan.skills) {
             console.log("");
-            console.log(pc.bold(`2. POST /api/v1/agents/:id/skills — "${skill.name}"`));
+            console.log(
+              pc.bold(
+                `2. POST /api/v1/agents/:id/skills — "${skill.name}" ` +
+                  `(${LANGUAGE_LABEL[skillPayloadLanguage(skill)]})`,
+              ),
+            );
             console.log(
               JSON.stringify(
                 { ...skill, code: `<${Buffer.byteLength(skill.code)} bytes of ${skill.scriptFilename}>` },
@@ -98,7 +134,15 @@ export function registerDeployCommand(program: Command): void {
 
         for (const skill of plan.skills) {
           await client.upsertSkill(upserted.id, skill);
-          console.log(pc.green(`  ✔ skill "${skill.name}" uploaded (${skill.scriptFilename})`));
+          const packages = skill.scriptDependencies?.length
+            ? `, npm: ${skill.scriptDependencies.join(", ")}`
+            : "";
+          console.log(
+            pc.green(
+              `  ✔ skill "${skill.name}" uploaded (${skill.scriptFilename}, ` +
+                `${LANGUAGE_LABEL[skillPayloadLanguage(skill)]}${packages})`,
+            ),
+          );
         }
 
         // Schedule is set AFTER skills so agentScheduleEntries can bind the

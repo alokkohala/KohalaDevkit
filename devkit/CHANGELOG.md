@@ -1,5 +1,26 @@
 # @kohala/devkit
 
+## 0.2.0
+
+- **TypeScript/JavaScript agents can now be shipped with the CLI.** `kohala
+  validate` and `kohala deploy` discover `.ts` / `.js` skill scripts
+  alongside `.py` (same extension table the platform uses) and report the
+  detected runtime per skill. A Node-lane skill's upload now carries
+  `runtimeLanguage` and the manifest's new `dependencies` (npm packages) as
+  `scriptDependencies`, so the platform runs its acceptance checks — compile,
+  security scan, npm allowlist — when the script is attached instead of
+  letting it fail on its first hosted run. A package outside the allowlist is
+  reported locally, with the platform's own message, before anything is sent
+  (`--allow-unknown-packages` defers to the server). A skill file with an
+  extension no runtime can execute is now a validation error for wrap-mode
+  agents. Python projects deploy byte-for-byte as before: their payload gains
+  no new fields.
+- **Start a TypeScript agent with one command.** `kohala init my-agent
+  --language ts` creates a typed `main.ts`, a local `_tools.ts` adapter with
+  the same API as the hosted Node SDK, strict TypeScript configuration, and
+  declared npm packages. The generated project validates, runs locally through
+  the Node lane, and produces a complete dry-run deploy plan without edits.
+
 ## 0.1.7
 
 - **BUG-006 fixed: `kohala deploy --run` no longer misreports every 409 as

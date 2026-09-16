@@ -54,6 +54,11 @@ skill scripts).
 }
 ```
 
+- Skill scripts can be Python (`main.py`) or TypeScript/JavaScript
+  (`main.ts`) — the extension picks the runtime, and a TypeScript agent
+  declares its npm packages with `"dependencies": ["zod"]` (allowlisted
+  packages only). `kohala run --local` executes Python skills; TypeScript
+  skills run hosted. See [MANIFEST.md](docs/MANIFEST.md#script-languages).
 - `runtimeMode: "wrap"` executes your script directly and validates its
   output (stdout). Use `llm.complete` from the script SDK to call an LLM
   mid-script (needs `ANTHROPIC_API_KEY` or `GEMINI_API_KEY`).

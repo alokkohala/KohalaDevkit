@@ -1,4 +1,10 @@
 import { z } from "zod";
+import {
+  ENTRYPOINT_EXTENSIONS,
+  hasNodeSkill,
+  languageForEntrypointFile,
+  SCRIPT_FILE_EXTENSIONS,
+} from "./language.js";
 
 /**
  * Zod schema for `kohala.json` — the agent manifest.
@@ -13,6 +19,7 @@ import { z } from "zod";
  * | `toolAllowlist`      | `agentToolAllowlist`     |
  * | `runtimeMode`        | `agentRuntimeMode`       |
  * | `skills`             | `agentSkills`            |
+ * | `dependencies`       | `scriptDependencies` (per Node skill) |
  * | `schedule`           | `agentScheduleCron`      |
  * | `caps.perRunTokens`  | `agentPerRunTokenCap`    |
  * | `caps.perDayTokens`  | `agentPerDayTokenCap`    |
@@ -106,6 +113,21 @@ const nameSchema = z
     "must start with a letter or digit and contain only letters, digits, '-' and '_'",
   );
 
+/**
+ * A skill's script filename. The extension picks the lane the platform runs
+ * it in (`.py` → Python, `.ts`/`.js` → TypeScript/JavaScript), so an
+ * extension neither lane knows is refused here rather than deployed as a
+ * skill the platform stores but never executes.
+ */
+const skillScriptSchema = z.string().min(1);
+
+/**
+ * npm package names. The platform caps a script's declared packages at 50
+ * names of at most 214 characters (npm's own limit); the same bounds are
+ * enforced locally so an over-long list fails before the deploy request.
+ */
+const dependenciesSchema = z.array(z.string().min(1).max(214)).max(50).default([]);
+
 /** Full manifest schema for kohala.json. */
 export const manifestSchema = z
   .object({
@@ -122,8 +144,20 @@ export const manifestSchema = z
      * "llm"   — run a real tool-use loop against the developer's own LLM key.
      */
     runtimeMode: z.enum(["wrap", "llm"]),
-    /** Map of skill name -> script filename, e.g. {"collect": "main.py"}. */
-    skills: z.record(z.string().min(1), z.string().min(1)).default({}),
+    /**
+     * Map of skill name -> script filename in `skills/`, e.g.
+     * {"collect": "main.py"} or {"collect": "main.ts"}. The file extension
+     * decides which runtime the platform executes the script in.
+     */
+    skills: z.record(z.string().min(1), skillScriptSchema).default({}),
+    /**
+     * npm packages the TypeScript/JavaScript skills import beyond Node's
+     * standard library. Only packages on the platform's allowlist are
+     * installed — `kohala validate` and `kohala deploy` refuse anything else
+     * offline, before the deploy request. Python skills never use this: pip
+     * packages are not installable from the CLI deploy path.
+     */
+    dependencies: dependenciesSchema,
     /** Cron expression. Used only on deploy; local runs are always manual. */
     schedule: z.string().min(1).optional(),
     caps: capsSchema,
@@ -133,6 +167,36 @@ export const manifestSchema = z
 
 /** A parsed, validated kohala.json. */
 export type AgentManifest = z.infer<typeof manifestSchema>;
+
+/**
+ * Cross-field problems the field-level schema cannot express, reported with
+ * the same "one problem per line" shape as a Zod issue.
+ *
+ * Kept OUT of the schema (as a `.refine`) on purpose: `manifestSchema` must
+ * stay a plain object schema so callers can reach into `.shape` (e.g.
+ * `kohala init` validating a name before scaffolding anything).
+ */
+export function crossFieldProblems(manifest: AgentManifest): string[] {
+  const problems: string[] = [];
+  if (manifest.runtimeMode === "wrap") {
+    for (const [name, filename] of Object.entries(manifest.skills)) {
+      if (languageForEntrypointFile(filename) === null) {
+        problems.push(
+          `skills.${name}: "${filename}" must be a script the platform can run in wrap mode — ` +
+            `one of: ${SCRIPT_FILE_EXTENSIONS.join(", ")}`,
+        );
+      }
+    }
+  }
+  if (manifest.dependencies.length > 0 && !hasNodeSkill(manifest.skills)) {
+    problems.push(
+      `dependencies: declares npm package(s) (${manifest.dependencies.join(", ")}) but no skill is a ` +
+        `TypeScript/JavaScript entrypoint — only those install npm packages ` +
+        `(hint: use a ${ENTRYPOINT_EXTENSIONS.node.join(" / ")} skill script, or remove "dependencies")`,
+    );
+  }
+  return problems;
+}
 /** A single validator entry. */
 export type AgentValidator = z.infer<typeof validatorSchema>;
 /** Token caps block. */

@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import type { AgentManifest } from "../manifest/schema.js";
+import { languageForEntrypointFile, type RuntimeLanguage } from "../manifest/language.js";
 
 /**
  * REST client for deploying agents to the hosted Kohala platform (A.5).
@@ -42,6 +43,25 @@ export interface SkillPayload {
   // the old `scriptContent` field is not in the platform schema and was
   // silently dropped, leaving the skill without a runnable script asset).
   code: string;
+  /**
+   * The lane the platform must run this script in. Sent ONLY for the Node
+   * lane: it selects the attach-time acceptance gate (TypeScript compile +
+   * JS security scanner + npm allowlist) and the interpreter that runs the
+   * script. Python skills omit it entirely — the platform's own default is
+   * Python, so their payload stays byte-for-byte what it has always been.
+   */
+  runtimeLanguage?: Extract<RuntimeLanguage, "node">;
+  /**
+   * npm packages the script imports (Node lane only). They exist nowhere
+   * else on the stored asset, so a script deployed without them resolves
+   * nothing at run time.
+   */
+  scriptDependencies?: string[];
+}
+
+/** The lane a planned skill upload will run in. */
+export function skillPayloadLanguage(payload: SkillPayload): RuntimeLanguage {
+  return payload.runtimeLanguage ?? "python";
 }
 
 /** Payload for the quota update — the platform's cap field names. */
@@ -68,11 +88,24 @@ export function buildDeployPlan(manifest: AgentManifest, agentDir: string): Depl
         `Skill "${name}" points at ${scriptFilename}, but ${scriptPath} does not exist.`,
       );
     }
+    // The extension picks the lane, exactly as the platform resolves it. A
+    // Node skill declares its lane and its packages so the platform runs its
+    // acceptance gate at attach time instead of failing on the first run; a
+    // Python skill sends neither key, so its payload is unchanged.
+    const language = languageForEntrypointFile(scriptFilename) ?? "python";
     return {
       name,
       scriptFilename,
       description: `Skill "${name}" of agent "${manifest.name}"`,
       code: fs.readFileSync(scriptPath, "utf8"),
+      ...(language === "node"
+        ? {
+            runtimeLanguage: "node" as const,
+            ...(manifest.dependencies.length > 0
+              ? { scriptDependencies: manifest.dependencies }
+              : {}),
+          }
+        : {}),
     };
   });
 
@@ -106,6 +139,30 @@ export function buildDeployPlan(manifest: AgentManifest, agentDir: string): Depl
         : {}),
     },
   };
+}
+
+/**
+ * Turn an API error body into the sentence the platform actually wrote.
+ *
+ * The platform answers a refused attach with `{"error": "<readable text>"}` —
+ * e.g. the acceptance gate's rejection naming an npm package outside the
+ * allowlist, or the TypeScript compile error. Echoing the raw JSON buried
+ * that message in punctuation; the raw body is still used verbatim whenever
+ * it is not a JSON envelope we recognize, so nothing is ever swallowed.
+ */
+export function readableApiError(body: string): string {
+  const raw = (body ?? "").trim();
+  try {
+    const parsed = JSON.parse(raw) as Record<string, unknown>;
+    const parts = [parsed.error, parsed.message]
+      .filter((part): part is string => typeof part === "string" && part.trim() !== "")
+      .map((part) => part.trim());
+    const unique = parts.filter((part, index) => parts.indexOf(part) === index);
+    if (unique.length > 0) return unique.join(" — ").slice(0, 1000);
+  } catch {
+    // Not JSON (HTML error page, plain text) — fall through to the raw body.
+  }
+  return raw.slice(0, 500);
 }
 
 /** Error with a user-actionable message for known HTTP statuses. */
@@ -177,7 +234,7 @@ export class KohalaClient {
       const text = await response.text();
       throw new DeployError(
         response.status,
-        `Kohala API error ${response.status} on ${method} ${apiPath}: ${text.slice(0, 500)}`,
+        `Kohala API error ${response.status} on ${method} ${apiPath}: ${readableApiError(text)}`,
       );
     }
     const text = await response.text();
